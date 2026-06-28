@@ -17,5 +17,38 @@ services:
       timeout: 5s
       retries: 10
 
+  minio:
+    image: minio/minio:latest
+    container_name: creon-backend-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: creon
+      MINIO_ROOT_PASSWORD: creon12345 # MinIO requires >= 8 characters
+    ports:
+      - '9000:9000' # S3 API
+      - '9001:9001' # web console
+    volumes:
+      - creon-minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: create the bucket and make it publicly readable, then exit.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 creon creon12345; do sleep 1; done &&
+      mc mb --ignore-existing local/creon-assets &&
+      mc anonymous set download local/creon-assets;
+      exit 0;"
+
 volumes:
   creon-pgdata:
+  creon-minio-data:
