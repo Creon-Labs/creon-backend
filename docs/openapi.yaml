@@ -1,0 +1,609 @@
+openapi: 3.1.0
+
+info:
+  title: Creon API
+  version: 0.1.0
+  description: |
+    Backend API for **Creon** — a Web3 crowdfunding (urun dana) platform for
+    Indonesian UMKM on Stellar/Soroban.
+
+    ## Authentication
+    All protected endpoints require a JWT bearer token obtained via
+    `POST /auth/login` or `POST /auth/register`.
+
+    ### Wallet challenge-response flow
+    1. `POST /auth/challenge` → receive a nonce message
+    2. Sign the message with your Stellar secret key (Ed25519)
+    3. `POST /auth/register` (first time) or `POST /auth/login` with the signature
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+
+tags:
+  - name: auth
+    description: Wallet-based challenge-response authentication
+  - name: kyc
+    description: KYC submission and status for entrepreneurs
+  - name: admin
+    description: Admin KYC review queue
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # ── Enums ──────────────────────────────────────────────────────────────────
+    KycStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED]
+      description: |
+        - `PENDING` – awaiting admin review
+        - `APPROVED` – identity verified
+        - `REJECTED` – rejected; entrepreneur may resubmit
+
+    # ── Request bodies ─────────────────────────────────────────────────────────
+    ChallengeRequest:
+      type: object
+      required: [walletAddress]
+      properties:
+        walletAddress:
+          type: string
+          minLength: 56
+          maxLength: 56
+          description: Stellar public key (G…, 56 characters)
+          example: GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3MV72CSOFA
+
+    RegisterRequest:
+      type: object
+      required: [walletAddress, signature, role]
+      properties:
+        walletAddress:
+          type: string
+          minLength: 56
+          maxLength: 56
+          description: Stellar public key (G…, 56 characters)
+          example: GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3MV72CSOFA
+        signature:
+          type: string
+          description: Base64-encoded Ed25519 signature over the challenge message
+        role:
+          type: string
+          enum: [ENTREPRENEUR, INVESTOR]
+          description: Self-assignable role for the new account
+        email:
+          type: string
+          format: email
+          description: Required when `role` is `ENTREPRENEUR`; optional for investors
+          example: founder@umkm.id
+        displayName:
+          type: string
+          description: Optional display name
+          example: Budi Santoso
+
+    LoginRequest:
+      type: object
+      required: [walletAddress, signature]
+      properties:
+        walletAddress:
+          type: string
+          minLength: 56
+          maxLength: 56
+          example: GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3MV72CSOFA
+        signature:
+          type: string
+          description: Base64-encoded Ed25519 signature over the challenge message
+
+    RejectRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Reason shown to the entrepreneur for re-submission
+          example: NIK tidak dapat diverifikasi, mohon upload ulang KTP yang jelas.
+
+    # ── Responses ──────────────────────────────────────────────────────────────
+    ChallengeResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          description: Nonce string to sign with the Stellar secret key
+          example: "Sign this message to authenticate with Creon: a3f8c1d2e9b7"
+
+    TokenResponse:
+      type: object
+      required: [accessToken]
+      properties:
+        accessToken:
+          type: string
+          description: JWT bearer token; payload contains `sub` (userId) and `roles`
+
+    KycSubmitResponse:
+      type: object
+      required: [status, submittedAt]
+      properties:
+        status:
+          $ref: '#/components/schemas/KycStatus'
+        submittedAt:
+          type: string
+          format: date-time
+
+    KycProfile:
+      type: object
+      required: [status, fullName, nationalId, submittedAt]
+      properties:
+        status:
+          $ref: '#/components/schemas/KycStatus'
+        fullName:
+          type: string
+          example: Budi Santoso
+        nationalId:
+          type: string
+          description: Indonesian NIK (16 digits)
+          example: "3271010101900001"
+        submittedAt:
+          type: string
+          format: date-time
+        reviewedAt:
+          type: [string, 'null']
+          format: date-time
+        rejectionReason:
+          type: [string, 'null']
+          example: Foto selfie tidak jelas.
+
+    AdminKycItem:
+      type: object
+      required:
+        - userId
+        - walletAddress
+        - email
+        - fullName
+        - nationalId
+        - status
+        - submittedAt
+        - idCardUrl
+      properties:
+        userId:
+          type: string
+          format: uuid
+        walletAddress:
+          type: string
+          minLength: 56
+          maxLength: 56
+        email:
+          type: string
+          format: email
+        fullName:
+          type: string
+        nationalId:
+          type: string
+          description: Indonesian NIK (16 digits)
+        status:
+          $ref: '#/components/schemas/KycStatus'
+        submittedAt:
+          type: string
+          format: date-time
+        rejectionReason:
+          type: [string, 'null']
+        idCardUrl:
+          type: string
+          format: uri
+          description: Presigned URL (5-minute TTL) for the KTP/ID card image
+        selfieUrl:
+          type: [string, 'null']
+          format: uri
+          description: Presigned URL (5-minute TTL) for the selfie image
+
+    AdminApproveResponse:
+      type: object
+      required: [userId, status, reviewedAt]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [APPROVED]
+        reviewedAt:
+          type: string
+          format: date-time
+
+    AdminRejectResponse:
+      type: object
+      required: [userId, status, reviewedAt, rejectionReason]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [REJECTED]
+        reviewedAt:
+          type: string
+          format: date-time
+        rejectionReason:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [statusCode, message]
+      properties:
+        statusCode:
+          type: integer
+          example: 400
+        message:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          example: "Both idCard and selfie files are required"
+        error:
+          type: string
+          example: Bad Request
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid JWT bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            statusCode: 401
+            message: Unauthorized
+
+    Forbidden:
+      description: Valid token but insufficient role
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            statusCode: 403
+            message: Forbidden resource
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            statusCode: 404
+            message: Not Found
+
+
+# ── Paths ──────────────────────────────────────────────────────────────────────
+paths:
+  /auth/challenge:
+    post:
+      tags: [auth]
+      summary: Request a challenge message
+      description: |
+        Returns a single-use nonce message that the client must sign with their
+        Stellar secret key. The challenge expires after 300 seconds and is deleted
+        after a successful login or registration (no replay).
+      operationId: authChallenge
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChallengeRequest'
+      responses:
+        '200':
+          description: Challenge message to sign
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChallengeResponse'
+        '400':
+          description: Invalid wallet address
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Register a new user
+      description: |
+        Creates a new user account. Verifies Stellar wallet ownership via the
+        signed challenge. Returns a JWT on success.
+
+        - `role` must be `ENTREPRENEUR` or `INVESTOR`
+        - `email` is **required** when `role` is `ENTREPRENEUR`
+      operationId: authRegister
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Account created — JWT returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Validation error or invalid signature
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Wallet address already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Log in an existing user
+      description: |
+        Authenticates an existing user by verifying the signed challenge.
+        Returns a JWT on success.
+      operationId: authLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated — JWT returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Invalid signature or expired challenge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Wallet address not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /kyc:
+    post:
+      tags: [kyc]
+      summary: Submit KYC
+      description: |
+        Submits identity verification for an entrepreneur. Both `idCard` and
+        `selfie` images are required (JPEG or PNG, ≤ 5 MB each).
+
+        The `nationalId` (NIK) must be unique — a second submission with an
+        existing NIK returns **409**. Resubmission on a `REJECTED` profile
+        overwrites the previous record (upsert on `userId`).
+      operationId: kycSubmit
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [fullName, nationalId, idCard, selfie]
+              properties:
+                fullName:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                  example: Budi Santoso
+                nationalId:
+                  type: string
+                  pattern: '^\d{16}$'
+                  description: Indonesian NIK — exactly 16 digits
+                  example: "3271010101900001"
+                dateOfBirth:
+                  type: string
+                  format: date
+                  description: Optional date of birth (YYYY-MM-DD)
+                  example: "1990-01-01"
+                idCard:
+                  type: string
+                  format: binary
+                  description: KTP / ID card image (JPEG or PNG, max 5 MB)
+                selfie:
+                  type: string
+                  format: binary
+                  description: Selfie image (JPEG or PNG, max 5 MB)
+      responses:
+        '201':
+          description: KYC submitted — status is PENDING
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycSubmitResponse'
+        '400':
+          description: Missing files, wrong MIME type, or validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: NIK already registered to another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /kyc/me:
+    get:
+      tags: [kyc]
+      summary: Get own KYC status
+      description: Returns the authenticated entrepreneur's current KYC profile.
+      operationId: kycGetMine
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: KYC profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No KYC submission found for this user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/kyc:
+    get:
+      tags: [admin]
+      summary: List KYC submissions
+      description: |
+        Returns KYC submissions filtered by status. Defaults to `PENDING`.
+        Each item includes presigned image URLs (5-minute TTL) for in-browser review.
+      operationId: adminKycList
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/KycStatus'
+          description: Filter by KYC status (default `PENDING`)
+      responses:
+        '200':
+          description: List of KYC submissions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminKycItem'
+        '400':
+          description: Invalid status value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/kyc/{userId}/approve:
+    post:
+      tags: [admin]
+      summary: Approve a KYC submission
+      description: |
+        Transitions the entrepreneur's profile from `PENDING` to `APPROVED`.
+        Only `PENDING` profiles can be approved — any other state returns **409**.
+      operationId: adminKycApprove
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the entrepreneur to approve
+      responses:
+        '200':
+          description: KYC approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminApproveResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Profile is not in PENDING state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/kyc/{userId}/reject:
+    post:
+      tags: [admin]
+      summary: Reject a KYC submission
+      description: |
+        Transitions the entrepreneur's profile from `PENDING` to `REJECTED`.
+        The `reason` is stored and returned to the entrepreneur via `GET /kyc/me`.
+        Only `PENDING` profiles can be rejected — any other state returns **409**.
+      operationId: adminKycReject
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the entrepreneur to reject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectRequest'
+      responses:
+        '200':
+          description: KYC rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminRejectResponse'
+        '400':
+          description: Missing or invalid reason
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Profile is not in PENDING state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
