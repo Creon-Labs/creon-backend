@@ -6,6 +6,8 @@ import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './storage/storage.module';
 import { CacheModule } from './cache/cache.module';
 import { AuthModule } from './auth/auth.module';
+import { KycModule } from './kyc/kyc.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -14,6 +16,8 @@ import { AuthModule } from './auth/auth.module';
     StorageModule,
     CacheModule,
     AuthModule,
+    KycModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

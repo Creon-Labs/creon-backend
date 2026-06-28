@@ -1,0 +1,132 @@
+import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
+import { AdminService } from './admin.service';
+
+function makePrisma() {
+  return {
+    entrepreneurProfile: {
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
+  } as unknown as PrismaService & {
+    entrepreneurProfile: {
+      findMany: jest.Mock;
+      findUnique: jest.Mock;
+      update: jest.Mock;
+    };
+  };
+}
+
+function makeStorage() {
+  return {
+    getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://signed'),
+  } as unknown as StorageService & { getPresignedDownloadUrl: jest.Mock };
+}
+
+const config = {
+  getOrThrow: () => 'creon-kyc',
+} as unknown as ConfigService;
+
+describe('AdminService', () => {
+  let prisma: ReturnType<typeof makePrisma>;
+  let storage: ReturnType<typeof makeStorage>;
+  let service: AdminService;
+
+  beforeEach(() => {
+    prisma = makePrisma();
+    storage = makeStorage();
+    service = new AdminService(prisma, storage, config);
+  });
+
+  it('lists submissions with presigned image URLs from the private bucket', async () => {
+    prisma.entrepreneurProfile.findMany.mockResolvedValue([
+      {
+        userId: 'u1',
+        fullName: 'Budi',
+        nationalId: '1234567890123456',
+        status: 'PENDING',
+        submittedAt: new Date(),
+        rejectionReason: null,
+        idCardImageKey: 'kyc/u1/id-card.jpg',
+        selfieImageKey: 'kyc/u1/selfie.jpg',
+        user: { walletAddress: 'GABC', email: 'e@x.com' },
+      },
+    ]);
+
+    const result = await service.list('PENDING');
+
+    expect(storage.getPresignedDownloadUrl).toHaveBeenCalledWith(
+      'kyc/u1/id-card.jpg',
+      300,
+      'creon-kyc',
+    );
+    expect(result[0]).toMatchObject({
+      userId: 'u1',
+      walletAddress: 'GABC',
+      idCardUrl: 'https://signed',
+      selfieUrl: 'https://signed',
+    });
+  });
+
+  it('approves a pending submission and stamps the reviewer', async () => {
+    prisma.entrepreneurProfile.findUnique.mockResolvedValue({
+      status: 'PENDING',
+    });
+    prisma.entrepreneurProfile.update.mockResolvedValue({
+      userId: 'u1',
+      status: 'APPROVED',
+    });
+
+    await service.approve('u1', 'admin1');
+
+    expect(prisma.entrepreneurProfile.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: 'u1' },
+        data: expect.objectContaining({
+          status: 'APPROVED',
+          reviewedById: 'admin1',
+        }) as unknown,
+      }) as unknown,
+    );
+  });
+
+  it('rejects a pending submission with a reason', async () => {
+    prisma.entrepreneurProfile.findUnique.mockResolvedValue({
+      status: 'PENDING',
+    });
+    prisma.entrepreneurProfile.update.mockResolvedValue({
+      userId: 'u1',
+      status: 'REJECTED',
+    });
+
+    await service.reject('u1', 'admin1', 'blurry photo');
+
+    expect(prisma.entrepreneurProfile.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'REJECTED',
+          rejectionReason: 'blurry photo',
+        }) as unknown,
+      }) as unknown,
+    );
+  });
+
+  it('404s when reviewing a missing submission', async () => {
+    prisma.entrepreneurProfile.findUnique.mockResolvedValue(null);
+    await expect(service.approve('u1', 'admin1')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('409s when reviewing a non-pending submission', async () => {
+    prisma.entrepreneurProfile.findUnique.mockResolvedValue({
+      status: 'APPROVED',
+    });
+    await expect(service.approve('u1', 'admin1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+  });
+});
