@@ -46,15 +46,19 @@ export class StorageService {
     });
   }
 
-  /** Upload an object. Returns the key it was stored under. */
+  /**
+   * Upload an object. Returns the key it was stored under.
+   * @param bucket overrides the default bucket (e.g. the private KYC bucket).
+   */
   async upload(
     key: string,
     body: StorageBody,
     contentType?: string,
+    bucket?: string,
   ): Promise<string> {
     await this.client.send(
       new PutObjectCommand({
-        Bucket: this.bucket,
+        Bucket: bucket ?? this.bucket,
         Key: key,
         Body: body,
         ContentType: contentType,
@@ -71,10 +75,13 @@ export class StorageService {
     );
   }
 
-  /** Delete an object. No-op if the key does not exist. */
-  async delete(key: string): Promise<void> {
+  /**
+   * Delete an object. No-op if the key does not exist.
+   * @param bucket overrides the default bucket.
+   */
+  async delete(key: string, bucket?: string): Promise<void> {
     await this.client.send(
-      new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+      new DeleteObjectCommand({ Bucket: bucket ?? this.bucket, Key: key }),
     );
     this.logger.log(`Deleted object: ${key}`);
   }
@@ -118,11 +125,16 @@ export class StorageService {
    * Presigned URL a client can `GET` directly from, bypassing this server.
    * Use this for private objects; for public buckets prefer {@link getPublicUrl}.
    * @param expiresIn lifetime in seconds (default 15 min).
+   * @param bucket overrides the default bucket (e.g. the private KYC bucket).
    */
-  async getPresignedDownloadUrl(key: string, expiresIn = 900): Promise<string> {
+  async getPresignedDownloadUrl(
+    key: string,
+    expiresIn = 900,
+    bucket?: string,
+  ): Promise<string> {
     return getSignedUrl(
       this.client,
-      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      new GetObjectCommand({ Bucket: bucket ?? this.bucket, Key: key }),
       { expiresIn },
     );
   }

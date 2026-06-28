@@ -51,7 +51,8 @@ services:
       timeout: 5s
       retries: 10
 
-  # One-shot: create the bucket and make it publicly readable, then exit.
+  # One-shot: create buckets, make the assets bucket publicly readable, then exit.
+  # creon-kyc stays PRIVATE (KTP/selfie PII) — accessed only via presigned URLs.
   minio-init:
     image: minio/mc:latest
     depends_on:
@@ -61,7 +62,8 @@ services:
       /bin/sh -c "
       until mc alias set local http://minio:9000 creon creon12345; do sleep 1; done &&
       mc mb --ignore-existing local/creon-assets &&
-      mc anonymous set download local/creon-assets;
+      mc anonymous set download local/creon-assets &&
+      mc mb --ignore-existing local/creon-kyc;
       exit 0;"
 
 volumes:
