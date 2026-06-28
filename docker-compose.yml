@@ -17,6 +17,21 @@ services:
       timeout: 5s
       retries: 10
 
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: creon-backend-valkey
+    restart: unless-stopped
+    command: ['valkey-server', '--save', '60', '1']
+    ports:
+      - '6379:6379'
+    volumes:
+      - creon-valkey-data:/data
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   minio:
     image: minio/minio:latest
     container_name: creon-backend-minio
@@ -52,3 +67,4 @@ services:
 volumes:
   creon-pgdata:
   creon-minio-data:
+  creon-valkey-data:
