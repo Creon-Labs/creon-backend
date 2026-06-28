@@ -16,6 +16,12 @@ enum Role {
   ADMIN
 }
 
+enum KycStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum ProposalStatus {
   DRAFT
   SUBMITTED
@@ -74,13 +80,38 @@ model User {
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  proposals          Proposal[]          @relation("EntrepreneurProposals")
-  reviews            ProposalReview[]    @relation("AdminReviews")
-  investments        Investment[]
-  holdings           TokenHolding[]
-  distributionClaims DistributionClaim[]
+  proposals           Proposal[]           @relation("EntrepreneurProposals")
+  reviews             ProposalReview[]     @relation("AdminReviews")
+  investments         Investment[]
+  holdings            TokenHolding[]
+  distributionClaims  DistributionClaim[]
+  entrepreneurProfile EntrepreneurProfile? @relation("UserEntrepreneurProfile")
+  kycReviews          EntrepreneurProfile[] @relation("AdminKycReviews")
 
   @@map("users")
+}
+
+model EntrepreneurProfile {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @unique @map("user_id") @db.Uuid
+  fullName        String    @map("full_name")
+  nationalId      String    @unique @map("national_id") @db.VarChar(16) // NIK; unique = cegah KYC ganda
+  dateOfBirth     DateTime? @map("date_of_birth") @db.Date
+  idCardImageKey  String    @map("id_card_image_key") // object key di bucket PRIVAT
+  selfieImageKey  String?   @map("selfie_image_key")
+  status          KycStatus @default(PENDING)
+  submittedAt     DateTime  @default(now()) @map("submitted_at") @db.Timestamptz
+  reviewedById    String?   @map("reviewed_by_id") @db.Uuid
+  reviewedAt      DateTime? @map("reviewed_at") @db.Timestamptz
+  rejectionReason String?   @map("rejection_reason") @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user       User  @relation("UserEntrepreneurProfile", fields: [userId], references: [id])
+  reviewedBy User? @relation("AdminKycReviews", fields: [reviewedById], references: [id])
+
+  @@index([status])
+  @@map("entrepreneur_profiles")
 }
 
 model Proposal {
