@@ -1,0 +1,262 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- enums ----------
+enum Role {
+  ENTREPRENEUR
+  INVESTOR
+  ADMIN
+}
+
+enum ProposalStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum ReviewDecision {
+  APPROVED
+  REJECTED
+}
+
+enum CampaignStatus {
+  PENDING_DEPLOYMENT
+  ACTIVE
+  LOCKED
+  GOAL_REACHED
+  COMPLETED
+  CANCELLED
+}
+
+enum VaultStatus {
+  PENDING
+  FUNDING
+  LOCKED
+  RELEASED
+  SETTLED
+}
+
+enum InvestmentStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+enum DistributionStatus {
+  PENDING
+  COMPLETED
+}
+
+enum ClaimStatus {
+  PENDING
+  CLAIMED
+  FAILED
+}
+
+// ---------- models ----------
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  walletAddress String   @unique @map("wallet_address") @db.VarChar(56)
+  email         String?  @unique
+  displayName   String?  @map("display_name")
+  roles         Role[]   @default([INVESTOR])
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  proposals          Proposal[]          @relation("EntrepreneurProposals")
+  reviews            ProposalReview[]    @relation("AdminReviews")
+  investments        Investment[]
+  holdings           TokenHolding[]
+  distributionClaims DistributionClaim[]
+
+  @@map("users")
+}
+
+model Proposal {
+  id                  String         @id @default(uuid()) @db.Uuid
+  entrepreneurId      String         @map("entrepreneur_id") @db.Uuid
+  businessName        String         @map("business_name")
+  businessDescription String         @map("business_description") @db.Text
+  category            String
+  location            String?
+  requestedAmount     Decimal        @map("requested_amount") @db.Decimal(28, 7)
+  lockPeriodDays      Int            @map("lock_period_days")
+  status              ProposalStatus @default(DRAFT)
+  submittedAt         DateTime?      @map("submitted_at") @db.Timestamptz
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  entrepreneur User             @relation("EntrepreneurProposals", fields: [entrepreneurId], references: [id])
+  reviews      ProposalReview[]
+  campaign     Campaign?
+
+  @@index([status])
+  @@index([entrepreneurId])
+  @@map("proposals")
+}
+
+model ProposalReview {
+  id         String         @id @default(uuid()) @db.Uuid
+  proposalId String         @map("proposal_id") @db.Uuid
+  adminId    String         @map("admin_id") @db.Uuid
+  decision   ReviewDecision
+  notes      String?        @db.Text
+  reviewedAt DateTime       @default(now()) @map("reviewed_at") @db.Timestamptz
+
+  proposal Proposal @relation(fields: [proposalId], references: [id])
+  admin    User     @relation("AdminReviews", fields: [adminId], references: [id])
+
+  @@index([proposalId])
+  @@map("proposal_reviews")
+}
+
+model Campaign {
+  id              String         @id @default(uuid()) @db.Uuid
+  proposalId      String         @unique @map("proposal_id") @db.Uuid
+  contractAddress String?        @map("contract_address") @db.VarChar(56)
+  goalAmount      Decimal        @map("goal_amount") @db.Decimal(28, 7)
+  raisedAmount    Decimal        @default(0) @map("raised_amount") @db.Decimal(28, 7)
+  status          CampaignStatus @default(PENDING_DEPLOYMENT)
+  lockStartAt     DateTime?      @map("lock_start_at") @db.Timestamptz
+  lockEndAt       DateTime?      @map("lock_end_at") @db.Timestamptz
+  startAt         DateTime?      @map("start_at") @db.Timestamptz
+  endAt           DateTime?      @map("end_at") @db.Timestamptz
+  deployTxHash    String?        @map("deploy_tx_hash") @db.VarChar(64)
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  proposal      Proposal             @relation(fields: [proposalId], references: [id])
+  projectToken  ProjectToken?
+  vault         CampaignVault?
+  investments   Investment[]
+  holdings      TokenHolding[]
+  distributions ProfitDistribution[]
+
+  @@index([status])
+  @@map("campaigns")
+}
+
+model ProjectToken {
+  id              String   @id @default(uuid()) @db.Uuid
+  campaignId      String   @unique @map("campaign_id") @db.Uuid
+  assetCode       String   @map("asset_code") @db.VarChar(12)
+  issuerAddress   String?  @map("issuer_address") @db.VarChar(56)
+  contractAddress String?  @map("contract_address") @db.VarChar(56)
+  totalSupply     Decimal? @map("total_supply") @db.Decimal(28, 7)
+  isTransferable  Boolean  @default(false) @map("is_transferable")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@map("project_tokens")
+}
+
+model CampaignVault {
+  id                 String      @id @default(uuid()) @db.Uuid
+  campaignId         String      @unique @map("campaign_id") @db.Uuid
+  contractAddress    String?     @map("contract_address") @db.VarChar(56)
+  totalDeposited     Decimal     @default(0) @map("total_deposited") @db.Decimal(28, 7)
+  releasedToBusiness Decimal     @default(0) @map("released_to_business") @db.Decimal(28, 7)
+  lockStartAt        DateTime?   @map("lock_start_at") @db.Timestamptz
+  lockEndAt          DateTime?   @map("lock_end_at") @db.Timestamptz
+  status             VaultStatus @default(PENDING)
+  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@map("campaign_vaults")
+}
+
+model Investment {
+  id         String           @id @default(uuid()) @db.Uuid
+  campaignId String           @map("campaign_id") @db.Uuid
+  investorId String           @map("investor_id") @db.Uuid
+  amount     Decimal          @db.Decimal(28, 7)
+  lpTokens   Decimal?         @map("lp_tokens") @db.Decimal(28, 7)
+  txHash     String?          @unique @map("tx_hash") @db.VarChar(64)
+  status     InvestmentStatus @default(PENDING)
+  investedAt DateTime?        @map("invested_at") @db.Timestamptz
+  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+  investor User     @relation(fields: [investorId], references: [id])
+
+  @@index([campaignId, status])
+  @@index([investorId])
+  @@map("investments")
+}
+
+// Current share-token ownership, fed off-chain by the future SEP-41 event indexer.
+model TokenHolding {
+  id            String   @id @default(uuid()) @db.Uuid
+  campaignId    String   @map("campaign_id") @db.Uuid
+  holderId      String?  @map("holder_id") @db.Uuid // null if holder is an unregistered address
+  holderAddress String   @map("holder_address") @db.VarChar(56)
+  balance       Decimal  @default(0) @db.Decimal(28, 7)
+  updatedLedger BigInt   @map("updated_ledger")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+  holder   User?    @relation(fields: [holderId], references: [id])
+
+  @@unique([campaignId, holderAddress])
+  @@index([holderId])
+  @@map("token_holdings")
+}
+
+model ProfitDistribution {
+  id             String             @id @default(uuid()) @db.Uuid
+  campaignId     String             @map("campaign_id") @db.Uuid
+  totalAmount    Decimal            @map("total_amount") @db.Decimal(28, 7)
+  totalShares    Decimal            @map("total_shares") @db.Decimal(28, 7)
+  rewardPerShare Decimal            @map("reward_per_share") @db.Decimal(38, 18)
+  totalClaimed   Decimal            @default(0) @map("total_claimed") @db.Decimal(28, 7)
+  merkleRoot     String?            @map("merkle_root") @db.VarChar(66)
+  snapshotLedger BigInt?            @map("snapshot_ledger")
+  depositTxHash  String?            @unique @map("deposit_tx_hash") @db.VarChar(64)
+  status         DistributionStatus @default(PENDING)
+  distributedAt  DateTime           @default(now()) @map("distributed_at") @db.Timestamptz
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  campaign Campaign            @relation(fields: [campaignId], references: [id])
+  claims   DistributionClaim[]
+
+  @@index([campaignId])
+  @@map("profit_distributions")
+}
+
+model DistributionClaim {
+  id             String      @id @default(uuid()) @db.Uuid
+  distributionId String      @map("distribution_id") @db.Uuid
+  investorId     String      @map("investor_id") @db.Uuid
+  shareAmount    Decimal     @map("share_amount") @db.Decimal(28, 7)
+  amount         Decimal     @db.Decimal(28, 7)
+  merkleProof    String[]    @map("merkle_proof")
+  leafIndex      Int?        @map("leaf_index")
+  claimTxHash    String?     @unique @map("claim_tx_hash") @db.VarChar(64)
+  status         ClaimStatus @default(PENDING)
+  claimedAt      DateTime?   @map("claimed_at") @db.Timestamptz
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  distribution ProfitDistribution @relation(fields: [distributionId], references: [id])
+  investor     User               @relation(fields: [investorId], references: [id])
+
+  @@unique([distributionId, investorId])
+  @@index([investorId])
+  @@map("distribution_claims")
+}

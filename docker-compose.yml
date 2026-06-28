@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: creon-backend-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: creon
+      POSTGRES_PASSWORD: creon
+      POSTGRES_DB: creon
+    ports:
+      - '5432:5432'
+    volumes:
+      - creon-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U creon -d creon']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  creon-pgdata:
