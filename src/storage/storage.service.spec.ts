@@ -40,16 +40,20 @@ describe('StorageService', () => {
     s3Mock.on(PutObjectCommand).resolves({});
     const service = new StorageService(makeConfig());
 
-    const key = await service.upload('a/b.txt', Buffer.from('hi'), 'text/plain');
+    const key = await service.upload(
+      'a/b.txt',
+      Buffer.from('hi'),
+      'text/plain',
+    );
 
     expect(key).toBe('a/b.txt');
-    expect(s3Mock.commandCalls(PutObjectCommand)[0].args[0].input).toMatchObject(
-      {
-        Bucket: 'creon-assets',
-        Key: 'a/b.txt',
-        ContentType: 'text/plain',
-      },
-    );
+    expect(
+      s3Mock.commandCalls(PutObjectCommand)[0].args[0].input,
+    ).toMatchObject({
+      Bucket: 'creon-assets',
+      Key: 'a/b.txt',
+      ContentType: 'text/plain',
+    });
   });
 
   it('deletes by key', async () => {
@@ -88,7 +92,9 @@ describe('StorageService', () => {
   });
 
   it('throws when building a public URL without R2_PUBLIC_URL', () => {
-    const service = new StorageService(makeConfig({ R2_PUBLIC_URL: undefined }));
+    const service = new StorageService(
+      makeConfig({ R2_PUBLIC_URL: undefined }),
+    );
 
     expect(() => service.getPublicUrl('x')).toThrow(/R2_PUBLIC_URL/);
   });
