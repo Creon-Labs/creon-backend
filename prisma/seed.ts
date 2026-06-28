@@ -1,6 +1,10 @@
-import { PrismaClient, ProposalStatus, Role } from '@prisma/client';
+import 'dotenv/config';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient, ProposalStatus, Role } from '../generated/prisma/client';
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+});
 
 // Stellar public keys are 56 chars; pad readable placeholders to that length.
 const wallet = (prefix: string): string => prefix.padEnd(56, 'A');
