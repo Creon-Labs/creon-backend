@@ -3,6 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { JwtModule, JwtSignOptions } from '@nestjs/jwt';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
+import { ApprovedEntrepreneurGuard } from './guards/approved-entrepreneur.guard';
 
 @Module({
   imports: [
@@ -18,7 +21,14 @@ import { AuthService } from './auth.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService],
-  exports: [AuthService],
+  providers: [AuthService, JwtAuthGuard, RolesGuard, ApprovedEntrepreneurGuard],
+  // Re-export JwtModule so importers of AuthModule get JwtService for the guards.
+  exports: [
+    AuthService,
+    JwtAuthGuard,
+    RolesGuard,
+    ApprovedEntrepreneurGuard,
+    JwtModule,
+  ],
 })
 export class AuthModule {}
