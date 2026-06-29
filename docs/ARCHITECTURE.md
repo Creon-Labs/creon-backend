@@ -32,7 +32,7 @@
 | 10 | **Money precision** `Decimal(28,7)`; `rewardPerShare` `Decimal(38,18)` | Matches Stellar's 7 decimals; extra precision on the per-share accumulator avoids rounding drift | ✅ Implemented |
 | 11 | **Prisma pinned to `^6`** (not 7) | Prisma 7 drops `url = env()` and requires a driver adapter + `prisma.config.ts` — deferred to avoid friction | ✅ Implemented |
 | 12 | **Shared `ComplianceRegistry` contract** holds the single whitelist; every share token queries it (not a per-token list) | One KYC → whitelisted for all campaigns; one place for the backend to add/revoke; gives a home for revocation (expired KYC / sanctions) | ⏳ Contract not built |
-| 13 | **Investor onboarding mirrors the entrepreneur flow**: wallet register → KYC → backend whitelists the address; `invest()` is whitelist-gated on-chain | Securities crowdfunding (OJK SCF) requires KYC'd investors; gating in the contract means an unregistered wallet that calls `invest()` directly is *rejected*, not merely discouraged | ⏳ Not built |
+| 13 | **Investor onboarding mirrors the entrepreneur flow**: wallet register → KYC → backend whitelists the address; `invest()` is whitelist-gated on-chain | Securities crowdfunding (OJK SCF) requires KYC'd investors; gating in the contract means an unregistered wallet that calls `invest()` directly is *rejected*, not merely discouraged | 🟡 Register + KYC built (shared role-agnostic `KycProfile`, `/auth/register` role INVESTOR, `/kyc` open to both roles); on-chain whitelist ⏳ |
 
 ### Key distinction to remember: what "lock" actually locks
 Lock applies to **(a) withdrawing principal** and **(b) transferring the share

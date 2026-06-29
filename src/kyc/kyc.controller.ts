@@ -29,7 +29,7 @@ export class KycController {
 
   /** Submit KYC: identity fields + KTP/ID card and selfie images (both required). */
   @Post()
-  @Roles(Role.ENTREPRENEUR)
+  @Roles(Role.ENTREPRENEUR, Role.INVESTOR)
   @UseInterceptors(
     FileFieldsInterceptor(
       [
@@ -62,7 +62,7 @@ export class KycController {
 
   /** The caller's own KYC status. */
   @Get('me')
-  @Roles(Role.ENTREPRENEUR)
+  @Roles(Role.ENTREPRENEUR, Role.INVESTOR)
   getMine(@CurrentUser() user: AuthUser) {
     return this.kyc.getMine(user.userId);
   }

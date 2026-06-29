@@ -24,7 +24,7 @@ tags:
   - name: auth
     description: Wallet-based challenge-response authentication
   - name: kyc
-    description: KYC submission and status for entrepreneurs
+    description: KYC submission and status (entrepreneurs and investors)
   - name: admin
     description: Admin KYC review queue
 
@@ -43,7 +43,11 @@ components:
       description: |
         - `PENDING` – awaiting admin review
         - `APPROVED` – identity verified
-        - `REJECTED` – rejected; entrepreneur may resubmit
+        - `REJECTED` – rejected; user may resubmit
+
+    Role:
+      type: string
+      enum: [ENTREPRENEUR, INVESTOR, ADMIN]
 
     # ── Request bodies ─────────────────────────────────────────────────────────
     ChallengeRequest:
@@ -165,6 +169,7 @@ components:
         - userId
         - walletAddress
         - email
+        - roles
         - fullName
         - nationalId
         - status
@@ -181,6 +186,11 @@ components:
         email:
           type: string
           format: email
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+          description: Roles of the submitting user (e.g. `INVESTOR`, `ENTREPRENEUR`)
         fullName:
           type: string
         nationalId:
@@ -392,8 +402,9 @@ paths:
       tags: [kyc]
       summary: Submit KYC
       description: |
-        Submits identity verification for an entrepreneur. Both `idCard` and
-        `selfie` images are required (JPEG or PNG, ≤ 5 MB each).
+        Submits identity verification for the authenticated user (entrepreneur
+        or investor — one KYC per user). Both `idCard` and `selfie` images are
+        required (JPEG or PNG, ≤ 5 MB each).
 
         The `nationalId` (NIK) must be unique — a second submission with an
         existing NIK returns **409**. Resubmission on a `REJECTED` profile
@@ -460,7 +471,7 @@ paths:
     get:
       tags: [kyc]
       summary: Get own KYC status
-      description: Returns the authenticated entrepreneur's current KYC profile.
+      description: Returns the authenticated user's current KYC profile.
       operationId: kycGetMine
       security:
         - BearerAuth: []

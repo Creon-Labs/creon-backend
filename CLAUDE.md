@@ -94,20 +94,23 @@ ledger-sequence fields serialize to JSON.
   JWT with payload `{ sub: userId, roles }`. Verifying deletes the challenge (no replay).
 - Guards (manual, **no passport**): `JwtAuthGuard` (verifies bearer token, attaches
   `request.user`), `RolesGuard` (reads `@Roles(...)` via `Reflector`),
-  `ApprovedEntrepreneurGuard` (role ENTREPRENEUR **and** `EntrepreneurProfile.status
+  `ApprovedEntrepreneurGuard` (role ENTREPRENEUR **and** `KycProfile.status
   === APPROVED`; built + tested but **not yet wired** — no proposal route exists).
 - Decorators: `@Roles(...)`, `@CurrentUser()`. `AuthModule` re-exports `JwtModule`
   so importing modules get `JwtService` for the guards.
 
 **KYC + admin approval** (`src/kyc/`, `src/admin/`):
-- `POST /kyc` (entrepreneur) takes identity fields + `idCard` and `selfie` images
-  (both required, jpeg/png, ≤5 MB, memory storage via `FileFieldsInterceptor`).
-  Images are stored as object **keys** in the private KYC bucket
-  (`kyc/<userId>/<kind>-<uuid>.<ext>`); upserts one `EntrepreneurProfile` per user
+- KYC is **per user, role-agnostic** (one `KycProfile` per user) — both
+  ENTREPRENEUR and INVESTOR submit through the same route. Investors register via
+  `POST /auth/register` with `role: INVESTOR` (no dedicated endpoint).
+- `POST /kyc` (entrepreneur **or** investor) takes identity fields + `idCard` and
+  `selfie` images (both required, jpeg/png, ≤5 MB, memory storage via
+  `FileFieldsInterceptor`). Images are stored as object **keys** in the private KYC
+  bucket (`kyc/<userId>/<kind>-<uuid>.<ext>`); upserts one `KycProfile` per user
   → status PENDING. `nationalId` (NIK) is `@unique` (anti-Sybil) → P2002 returns 409.
 - `GET /kyc/me` returns the caller's status.
-- `admin/kyc` (admin): `GET ?status=` (returns presigned image URLs),
-  `POST :userId/approve`, `POST :userId/reject {reason}`.
+- `admin/kyc` (admin): `GET ?status=` (returns presigned image URLs + each
+  submitter's `roles`), `POST :userId/approve`, `POST :userId/reject {reason}`.
 
 **Data model** (`prisma/schema.prisma`): 11 models + 9 enums. DB columns are
 snake_case via `@map`; timestamps are `@db.Timestamptz`. The DB is an **off-chain
