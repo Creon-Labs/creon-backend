@@ -1,0 +1,200 @@
+# Creon — Smart Contract & On-Chain Integration Plan
+
+> Phased implementation plan for the Soroban smart contracts and the backend ↔
+> Stellar integration. Companion to [ARCHITECTURE.md](./ARCHITECTURE.md) (decisions)
+> and [PROJECT.md](./PROJECT.md) (narrative). This document is the **build order**;
+> keep it checked off as work lands.
+>
+> Last updated: 2026-06-29.
+
+## Design summary (the decisions this plan implements)
+
+These consolidate and, where noted, **refine** ARCHITECTURE.md:
+
+1. **Contract topology — 1 singleton + 2 per-campaign** (simplified from 5 contracts):
+   | Contract | Lifetime | Responsibility |
+   |---|---|---|
+   | `ComplianceRegistry` | **singleton** (1 per platform) | KYC whitelist: `add` / `remove` / `is_whitelisted`. Deployed once at platform setup. |
+   | `ShareToken` (restricted SEP-41) | per-campaign | Share token; `mint` **and** `transfer` gated by the registry + lock flag. |
+   | `Campaign` | per-campaign | **Merged vault + lifecycle + distribution**: `invest()`, USDC custody, lock/release, `deposit_profit`, `set_distribution(merkle_root)`, `claim(amount, proof)`. |
+
+   > Refines ARCHITECTURE.md decisions #3/#7/#12: vault and distribution are **folded
+   > into `Campaign`** to cut per-campaign deploys from 4 to **2 instances**. Split out
+   > later only if a real need appears.
+
+2. **Deploy orchestration — backend-orchestrated, async, idempotent. No factory.**
+   On approval the backend submits N deploy txs in sequence via the SDK, driven by a
+   DB state machine with retry. A factory contract is **deferred** (not worth its
+   contract-side complexity at this scale).
+
+3. **KYC whitelist — backend is the only writer.** On KYC approval the backend calls
+   `registry.add(wallet)`; on expiry/sanction, `registry.remove(wallet)`. Because
+   `mint`/`transfer` are gated on-chain, an unregistered wallet calling `invest()`
+   directly is **reverted** — the website is the only path onto the whitelist.
+
+4. **Ownership tracking — external indexer service, not a self-hosted worker.**
+   We consume a managed Soroban indexer (e.g. Mercury / SubQuery / equivalent). The
+   backend either **receives webhooks** or **queries** that service for share-token
+   `transfer`/`mint`/`burn` events and maintains `TokenHolding` from that feed.
+
+   > Supersedes ARCHITECTURE.md "Event Indexer (worker)" / decision #9 mechanics:
+   > we do **not** run our own continuous `getEvents` ingestion worker. The
+   > `TokenHolding` model and its role are unchanged; only the data source changes.
+
+5. **Dividends — pull-based, Merkle-pinned (unchanged).** Backend snapshots
+   `TokenHolding` at the deposit ledger, builds a Merkle tree, posts the root
+   on-chain; investors `claim(amount, proof)` and the contract verifies the proof, so
+   the backend cannot forge amounts.
+
+---
+
+## Phase 1 — Core smart contracts (Rust / Soroban)
+
+**Goal:** all three contract types written, unit-tested, and deployable to Stellar
+testnet. `ComplianceRegistry` live on testnet; `ShareToken` + `Campaign` WASM
+uploaded (instantiated per-campaign in Phase 2).
+
+**Deliverables**
+- [ ] `contracts/` Cargo workspace at repo root — standalone (kept out of the pnpm
+      build); `cargo` + `soroban-cli` toolchain, shared workspace deps.
+- [ ] `ComplianceRegistry`: `add(addr)`, `remove(addr)`, `is_whitelisted(addr) -> bool`,
+      admin-gated writes; events on add/remove.
+- [ ] `ShareToken` (restricted SEP-41): standard SEP-41 surface **plus** —
+      `mint` requires recipient whitelisted (queries registry); `transfer` requires
+      **recipient** whitelisted and is disabled while the lock flag is set; a
+      `set_minter` / lock-flag admin path.
+- [ ] `Campaign` (merged): `__constructor`/`initialize(token, registry, usdc, goal, lock_period)`;
+      `invest(investor, amount)` (whitelist-gated → pull USDC into custody → mint shares);
+      lock/`release_to_business`; `deposit_profit(amount)`; `set_distribution(id, merkle_root)`;
+      `claim(id, amount, proof)` with on-chain Merkle proof verification.
+- [ ] Unit tests per contract (Soroban test env): whitelist gating at mint **and**
+      transfer, lock behavior, invest happy-path + non-whitelisted revert, claim proof
+      verify/forge-reject.
+- [ ] Deploy `ComplianceRegistry` to testnet; upload `ShareToken` + `Campaign` WASM;
+      record registry address + both `wasm_hash` values for backend config.
+- [ ] Test USDC asset set up on testnet.
+
+**Acceptance:** on testnet, a non-whitelisted address calling `invest()` reverts; a
+whitelisted one receives shares; a forged Merkle proof on `claim()` is rejected.
+
+---
+
+## Phase 2 — Backend ↔ Stellar integration & deploy orchestration
+
+**Goal:** admin approval deploys a campaign's contracts automatically, idempotently,
+and persists addresses + tx hashes.
+
+**Design notes**
+- Approval endpoint only sets status + **enqueues a deploy job** — never deploys
+  inside the HTTP request.
+- DB state machine, retry from the last successful step (idempotency keyed on the
+  existing unique `tx_hash`):
+  `APPROVED → DEPLOYING_TOKEN → DEPLOYING_CAMPAIGN → WIRING → LIVE`
+  (deploy `ShareToken` → deploy `Campaign` → `token.set_minter(campaign)` → `LIVE`).
+
+**Deliverables**
+- [ ] Stellar/Soroban SDK + RPC client wiring; platform signing key via `ConfigService`.
+- [ ] Config for registry address + `ShareToken`/`Campaign` `wasm_hash`.
+- [ ] Deploy worker/job (instantiate from `wasm_hash` + salt, then wire).
+- [ ] Persist `*_address` + `deploy_tx_hash` per step; resumable on failure.
+- [ ] Campaign deploy state machine + status transitions on the `Campaign` model.
+- [ ] Unit tests for the orchestrator (incl. partial-failure resume).
+
+**Acceptance:** approving a proposal results in a `LIVE` campaign with token +
+campaign addresses persisted; killing the worker mid-deploy and restarting resumes
+without orphaned/duplicate contracts.
+
+**Depends on:** Phase 1.
+
+---
+
+## Phase 3 — KYC whitelist on-chain wiring
+
+**Goal:** KYC approval/revocation reflected in `ComplianceRegistry` on-chain.
+
+**Deliverables**
+- [ ] On admin KYC approve → submit `registry.add(wallet)`; persist tx hash + a
+      whitelist status on `KycProfile`.
+- [ ] Revocation path → `registry.remove(wallet)` (expiry / sanction).
+- [ ] Idempotent + retryable (don't double-add; reconcile on `tx_hash`).
+- [ ] Tests for approve→add and revoke→remove.
+
+**Acceptance:** an approved user's wallet returns `true` from `is_whitelisted`
+on-chain; a revoked one returns `false` and can no longer receive shares.
+
+**Depends on:** Phase 1 (registry live), Phase 2 (SDK wiring).
+
+---
+
+## Phase 4 — Investment flow
+
+**Goal:** whitelisted investors fund a live campaign in USDC and receive shares.
+
+**Deliverables**
+- [ ] Investments module: invest into a campaign (whitelisted/KYC'd only),
+      list-per-investor, campaign list/detail (live/locked).
+- [ ] Backend path to surface/relay the `invest()` interaction (build/submit or hand
+      the investor wallet a prepared tx — decide signing model here).
+- [ ] Persist `Investment` rows (historical purchase record; `lpTokens` = pro-rata basis).
+- [ ] DTOs + validation + tests.
+
+**Acceptance:** a whitelisted investor invests USDC and the campaign vault balance +
+their `ShareToken` balance increase; a non-whitelisted attempt is rejected on-chain.
+
+**Depends on:** Phases 1–3.
+
+---
+
+## Phase 5 — Ownership tracking via external indexer
+
+**Goal:** maintain `TokenHolding` (current balances) from a managed indexer, since
+SEP-41 is not enumerable on-chain — **without** running our own ingestion worker.
+
+**Design notes**
+- Choose the provider (Mercury / SubQuery / equivalent) and the mode:
+  **webhook push** (preferred) and/or **API query/poll** as fallback.
+- Backend's job is reconciliation into `TokenHolding`, not raw ingestion.
+
+**Deliverables**
+- [ ] Select indexer provider + subscribe to `ShareToken` transfer/mint/burn events.
+- [ ] Webhook receiver endpoint (verify signature/secret; idempotent on event id).
+- [ ] Reconcile events → upsert `TokenHolding` by `(campaignId, holderAddress)`.
+- [ ] Backfill/query path for gaps or initial sync.
+- [ ] Tests for webhook handling + holding reconciliation.
+
+**Acceptance:** after on-chain transfers, `TokenHolding` matches on-chain balances
+for a campaign within the indexer's delivery latency.
+
+**Depends on:** Phase 1 (token deployed), Phase 4 (real transfers to observe).
+
+---
+
+## Phase 6 — Dividend distribution (Merkle)
+
+**Goal:** business deposits profit; investors claim pro-rata dividends, enforced
+on-chain via a Merkle root.
+
+**Deliverables**
+- [ ] On `deposit_profit` (observed via the indexer) → fix snapshot ledger; read
+      `TokenHolding` at that ledger.
+- [ ] Compute pro-rata entitlements; build Merkle tree + root; persist
+      `ProfitDistribution` + per-holder `DistributionClaim` (with `merkleProof`).
+- [ ] Post `set_distribution(id, merkle_root)` on-chain.
+- [ ] API: list entitlements, fetch proof, mark claimed (driven by indexer `claim` events).
+- [ ] Unclaimed-dividend policy (rollover vs return) + claim window.
+- [ ] Tests for snapshot math, tree/root, and claim status reconciliation.
+
+**Acceptance:** a deposited profit yields claimable entitlements; an investor's
+`claim(id, amount, proof)` succeeds and is marked `CLAIMED`; total claims are bounded
+by the deposited amount.
+
+**Depends on:** Phases 1–5.
+
+---
+
+## Build order rationale
+
+Riskiest / most foundational first: **Phase 1 proves KYC gating on-chain**, and
+**Phases 1–4 are enough for a demo** ("approve → campaign live → whitelisted investor
+invests, non-KYC rejected on-chain"). Phases 5–6 complete the dividend (bagi hasil)
+story.

@@ -4,6 +4,12 @@
 > made for the backend data & on-chain value model, and the **checklist of what
 > still needs to be built**. Keep it up to date as decisions change or work lands.
 >
+> The **phased build order** for the contracts + on-chain integration lives in
+> [SMART_CONTRACT_PLAN.md](./SMART_CONTRACT_PLAN.md). That plan refines two
+> mechanics recorded here: the per-campaign contracts are **merged** (vault +
+> distribution folded into `Campaign` — see #7), and ownership tracking uses an
+> **external indexer service** rather than a self-hosted worker (see #9).
+>
 > Last updated: 2026-06-29.
 
 ## Status at a glance
@@ -26,12 +32,13 @@
 | 4 | **Returns via dividends / bagi hasil** (NOT buyback) | Transparent & easy to value for retail UMKM investors; value is conserved (can't both pay cash and inflate price from the same profit) | ✅ Schema supports it |
 | 5 | **Pull-based distribution** (investors `claim()`, not push) | Pushing payouts in a loop is gas-heavy and a DoS risk; pull scales and is safe | ✅ Schema supports it |
 | 6 | **Entitlement via Merkle snapshot** (NOT an accumulator/transfer-hook token) | After unlock holders change, so ownership must be pinned to a moment. Backend snapshots balances off-chain, posts a **merkle root** on-chain; claims verify against it → trust-minimized, and the token stays standard SEP-41 | ⏳ Service not built |
-| 7 | **Custody via Vault/Escrow** (NOT an AMM pool) | An AMM is redundant in a dividend model and contradicts crowdfunding — exit liquidity would require parking the very USDC that must go to the business | ✅ `CampaignVault` model |
+| 7 | **Custody via Vault/Escrow** (NOT an AMM pool); vault + distribution **folded into the `Campaign` contract** | An AMM is redundant in a dividend model and contradicts crowdfunding — exit liquidity would require parking the very USDC that must go to the business. Merging cuts per-campaign deploys from 4 to 2 instances (see SMART_CONTRACT_PLAN.md #1) | ✅ `CampaignVault` model; ⏳ contract |
 | 8 | **Lifecycle Model A** — periodic dividends allowed **during** the lock | Lock secures the *principal* + token *transferability*, not profit-sharing; business can share profit while capital stays locked | ✅ Schema supports it |
-| 9 | **Ownership tracked in `TokenHolding`** (fed by an event indexer) | SEP-41 is **not enumerable on-chain** (like ERC-20). After unlock, `Investment` ≠ current ownership; the indexer rebuilds holdings from transfer/mint events | ⏳ Indexer not built |
+| 9 | **Ownership tracked in `TokenHolding`** (fed by an **external indexer service** — webhook/query, not a self-hosted worker) | SEP-41 is **not enumerable on-chain** (like ERC-20). After unlock, `Investment` ≠ current ownership; a managed Soroban indexer (Mercury/SubQuery/equivalent) feeds holdings from transfer/mint/burn events so we don't run continuous `getEvents` ingestion ourselves | ⏳ Integration not built |
 | 10 | **Money precision** `Decimal(28,7)`; `rewardPerShare` `Decimal(38,18)` | Matches Stellar's 7 decimals; extra precision on the per-share accumulator avoids rounding drift | ✅ Implemented |
 | 11 | **Prisma pinned to `^6`** (not 7) | Prisma 7 drops `url = env()` and requires a driver adapter + `prisma.config.ts` — deferred to avoid friction | ✅ Implemented |
-| 12 | **Shared `ComplianceRegistry` contract** holds the single whitelist; every share token queries it (not a per-token list) | One KYC → whitelisted for all campaigns; one place for the backend to add/revoke; gives a home for revocation (expired KYC / sanctions) | ⏳ Contract not built |
+| 12 | **Shared `ComplianceRegistry` contract** (singleton) holds the single whitelist; every share token queries it (not a per-token list) | One KYC → whitelisted for all campaigns; one place for the backend to add/revoke; gives a home for revocation (expired KYC / sanctions) | ⏳ Contract not built |
+| 13 | **Deploy orchestration is backend-driven, async + idempotent — no factory contract** | On approval the backend submits N deploy txs in sequence via a DB state machine (`APPROVED → DEPLOYING_TOKEN → DEPLOYING_CAMPAIGN → WIRING → LIVE`), resumable on partial failure (idempotent on the unique `tx_hash`). A factory adds contract-side complexity not worth it at this scale | ⏳ Not built |
 | 13 | **Investor onboarding mirrors the entrepreneur flow**: wallet register → KYC → backend whitelists the address; `invest()` is whitelist-gated on-chain | Securities crowdfunding (OJK SCF) requires KYC'd investors; gating in the contract means an unregistered wallet that calls `invest()` directly is *rejected*, not merely discouraged | 🟡 Register + KYC built (shared role-agnostic `KycProfile`, `/auth/register` role INVESTOR, `/kyc` open to both roles); on-chain whitelist ⏳ |
 
 ### Key distinction to remember: what "lock" actually locks
@@ -95,7 +102,7 @@ The target flow once the on-chain pieces exist:
 ```
 1. Business earns profit → deposit_profit(USDC) to the Distribution contract
         └─ contract emits ProfitDeposited(campaign, amount, ledger)
-2. Indexer captures the event → fix the SNAPSHOT LEDGER (= deposit ledger)
+2. External indexer delivers the event → fix the SNAPSHOT LEDGER (= deposit ledger)
         └─ read TokenHolding at that ledger → { address, shareAmount }
 3. Backend computes each holder's entitlement = amount × shareAmount / totalShares
         └─ build a Merkle tree of (address, entitlement) → merkle root
@@ -116,16 +123,16 @@ amounts, and total claims are bounded by the deposited amount.
 ## System components beyond the database
 
 ```
-Soroban RPC (getEvents) ──transfer/mint/burn/claim events──► Event Indexer (worker)
-                                                                  │
-                                                                  ├─► raw event log (audit / rebuild)
-                                                                  └─► TokenHolding (current balances) ──► dividend snapshot
+External indexer service ──transfer/mint/burn/claim events──► Backend (webhook receiver / query)
+   (Mercury / SubQuery /                                           │
+    equivalent)                                                    └─► TokenHolding (current balances) ──► dividend snapshot
 ```
 
-The **event indexer is load-bearing infra**, not optional: SEP-41 has no on-chain
-holder enumeration, and Soroban RPC event retention is short (a few days), so the
-backend must ingest continuously from token-deploy ledger onward and persist the
-raw log.
+Ownership feed is **load-bearing infra**, not optional: SEP-41 has no on-chain
+holder enumeration, and Soroban RPC event retention is short (a few days). Rather
+than run our own continuous ingestion worker, we subscribe to a **managed Soroban
+indexer** and the backend reconciles its events into `TokenHolding` (webhook push
+preferred, API query/poll as fallback). See SMART_CONTRACT_PLAN.md Phase 5.
 
 ---
 
@@ -134,11 +141,11 @@ raw log.
 What still needs to be built, grouped by area. Check items off as they land.
 
 ### A. Soroban smart contracts
-- [ ] Campaign contract (created on proposal approval; holds campaign lifecycle; `invest()` checks the whitelist before minting shares).
-- [ ] **Restricted SEP-41 share token** — **`mint` and `transfer` both gated** by lock period + whitelist (KYC); recipient must be whitelisted.
-- [ ] **`ComplianceRegistry` contract** — single source-of-truth whitelist (`add` / `remove` / `is_whitelisted`); queried by share tokens at mint + transfer.
-- [ ] Vault/Escrow contract — custody of fundraised USDC, lock, release to business.
-- [ ] Distribution contract — `deposit_profit`, `set_distribution(merkleRoot)`, `claim(amount, proof)` with on-chain proof verification.
+> Topology = 1 singleton + 2 per-campaign (vault + distribution folded into `Campaign`).
+> See SMART_CONTRACT_PLAN.md Phase 1 for the detailed contract checklist.
+- [ ] **`ComplianceRegistry` contract** (singleton) — single source-of-truth whitelist (`add` / `remove` / `is_whitelisted`); queried by share tokens at mint + transfer.
+- [ ] **Restricted SEP-41 share token** (`ShareToken`, per-campaign) — **`mint` and `transfer` both gated** by lock period + whitelist (KYC); recipient must be whitelisted.
+- [ ] **`Campaign` contract** (per-campaign, merged vault + distribution) — lifecycle + `invest()` (whitelist-gated mint), USDC custody + lock/release, and `deposit_profit` / `set_distribution(merkleRoot)` / `claim(amount, proof)` with on-chain proof verification.
 - [ ] Test USDC asset setup on Stellar testnet.
 
 ### B. On-chain integration (backend ↔ Stellar)
@@ -146,11 +153,12 @@ What still needs to be built, grouped by area. Check items off as they land.
 - [ ] Deploy orchestration: on approval → deploy campaign + token + vault, persist contract addresses + `deploy_tx_hash`.
 - [ ] Idempotent reconciliation keyed on `tx_hash` (schema already enforces uniqueness).
 
-### C. Event indexer worker
-- [ ] Subscribe to Soroban RPC `getEvents` for share-token transfer/mint/burn + distribution events.
-- [ ] Persist a raw event log; maintain `TokenHolding` (upsert balances by `(campaignId, holderAddress)`).
-- [ ] Continuous ingestion from deploy ledger (handle short RPC retention); reconciliation/backfill strategy.
-- [ ] Update `Investment` / `ProfitDistribution` / `DistributionClaim` statuses from on-chain events.
+### C. Ownership feed (external indexer service)
+> See SMART_CONTRACT_PLAN.md Phase 5. We consume a managed indexer; no self-hosted worker.
+- [ ] Select indexer provider (Mercury / SubQuery / equivalent) + subscribe to share-token transfer/mint/burn + distribution events.
+- [ ] Webhook receiver endpoint (verify secret/signature; idempotent on event id), with API query/poll as backfill fallback.
+- [ ] Reconcile events → maintain `TokenHolding` (upsert balances by `(campaignId, holderAddress)`).
+- [ ] Update `Investment` / `ProfitDistribution` / `DistributionClaim` statuses from indexed events.
 
 ### D. Dividend / Merkle distribution service
 - [ ] On `ProfitDeposited`: snapshot `TokenHolding` at the deposit ledger.
