@@ -55,27 +55,28 @@ testnet. `ComplianceRegistry` live on testnet; `ShareToken` + `Campaign` WASM
 uploaded (instantiated per-campaign in Phase 2).
 
 **Deliverables**
-- [ ] `contracts/` Cargo workspace at repo root — standalone (kept out of the pnpm
-      build); `cargo` + `soroban-cli` toolchain, shared workspace deps.
-- [ ] `ComplianceRegistry`: `add(addr)`, `remove(addr)`, `is_whitelisted(addr) -> bool`,
-      admin-gated writes; events on add/remove.
-- [ ] `ShareToken` (restricted SEP-41): standard SEP-41 surface **plus** —
-      `mint` requires recipient whitelisted (queries registry); `transfer` requires
-      **recipient** whitelisted and is disabled while the lock flag is set; a
-      `set_minter` / lock-flag admin path.
-- [ ] `Campaign` (merged): `__constructor`/`initialize(token, registry, usdc, goal, lock_period)`;
-      `invest(investor, amount)` (whitelist-gated → pull USDC into custody → mint shares);
-      lock/`release_to_business`; `deposit_profit(amount)`; `set_distribution(id, merkle_root)`;
-      `claim(id, amount, proof)` with on-chain Merkle proof verification.
-- [ ] Unit tests per contract (Soroban test env): whitelist gating at mint **and**
+- [x] `contracts/` Cargo workspace (repo subfolder) — standalone (kept out of the pnpm
+      build); `cargo` + `stellar` CLI toolchain, shared workspace deps.
+- [x] `ComplianceRegistry`: `add(addr)`, `remove(addr)`, `is_whitelisted(addr) -> bool`,
+      owner-gated writes (OZ Ownable); typed events on add/remove.
+- [x] `ShareToken` (restricted SEP-41 on OpenZeppelin `stellar-tokens` `Base`):
+      `mint` requires recipient whitelisted (queries registry) and is minter-only;
+      `transfer`/`transfer_from` require **recipient** whitelisted and are disabled while
+      the lock flag is set; `set_minter` / `set_lock` admin path. (Shares are non-burnable.)
+- [x] `Campaign` (merged): `__constructor(owner, token, registry, usdc, business, goal, lock_period)`;
+      `invest(investor, amount)` (whitelist-gated → pull USDC into custody → mint shares 1:1);
+      `release_to_business`/`unlock`; `deposit_profit(from, amount)`; `set_distribution(id, merkle_root)`;
+      `claim(id, index, claimant, amount, proof)` with on-chain commutative SHA-256 Merkle verification.
+- [x] Unit tests per contract (Soroban test env, 13 passing): whitelist gating at mint **and**
       transfer, lock behavior, invest happy-path + non-whitelisted revert, claim proof
-      verify/forge-reject.
-- [ ] Deploy `ComplianceRegistry` to testnet; upload `ShareToken` + `Campaign` WASM;
-      record registry address + both `wasm_hash` values for backend config.
-- [ ] Test USDC asset set up on testnet.
+      verify/forge-reject + double-claim.
+- [x] Deployed `ComplianceRegistry` to testnet; uploaded `ShareToken` + `Campaign` WASM;
+      recorded registry address + both `wasm_hash` values (see `contracts/deployments/testnet.json`).
+- [x] Test USDC asset (SAC) set up on testnet.
 
-**Acceptance:** on testnet, a non-whitelisted address calling `invest()` reverts; a
-whitelisted one receives shares; a forged Merkle proof on `claim()` is rejected.
+**Acceptance:** ✅ verified on testnet — a non-whitelisted address calling `invest()` reverts; a
+whitelisted one receives shares (via gated `mint`); a forged Merkle proof on `claim()` is rejected.
+Registry `CCTB7KFSZCWSIB3UGYTSDO5PBWMTKD5XCDIEGIEAYVPZSH5K3S5RANQ7`; artifacts in `contracts/deployments/testnet.json`.
 
 ---
 

@@ -143,10 +143,10 @@ What still needs to be built, grouped by area. Check items off as they land.
 ### A. Soroban smart contracts
 > Topology = 1 singleton + 2 per-campaign (vault + distribution folded into `Campaign`).
 > See SMART_CONTRACT_PLAN.md Phase 1 for the detailed contract checklist.
-- [ ] **`ComplianceRegistry` contract** (singleton) — single source-of-truth whitelist (`add` / `remove` / `is_whitelisted`); queried by share tokens at mint + transfer.
-- [ ] **Restricted SEP-41 share token** (`ShareToken`, per-campaign) — **`mint` and `transfer` both gated** by lock period + whitelist (KYC); recipient must be whitelisted.
-- [ ] **`Campaign` contract** (per-campaign, merged vault + distribution) — lifecycle + `invest()` (whitelist-gated mint), USDC custody + lock/release, and `deposit_profit` / `set_distribution(merkleRoot)` / `claim(amount, proof)` with on-chain proof verification.
-- [ ] Test USDC asset setup on Stellar testnet.
+- [x] **`ComplianceRegistry` contract** (singleton) — single source-of-truth whitelist (`add` / `remove` / `is_whitelisted`); queried by share tokens at mint + transfer. _(Phase 1; live on testnet.)_
+- [x] **Restricted SEP-41 share token** (`ShareToken`, per-campaign) — **`mint` and `transfer` both gated** by lock period + whitelist (KYC); recipient must be whitelisted. Built on OpenZeppelin `stellar-tokens`. _(Phase 1; WASM uploaded.)_
+- [x] **`Campaign` contract** (per-campaign, merged vault + distribution) — lifecycle + `invest()` (whitelist-gated mint), USDC custody + lock/release, and `deposit_profit` / `set_distribution(merkleRoot)` / `claim(amount, proof)` with on-chain proof verification. _(Phase 1; WASM uploaded.)_
+- [x] Test USDC asset setup on Stellar testnet. _(SAC deployed; see `contracts/deployments/testnet.json`.)_
 
 ### B. On-chain integration (backend ↔ Stellar)
 - [ ] Stellar SDK / Soroban RPC client wiring + signing for platform-side txs.
