@@ -3,6 +3,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
@@ -35,6 +37,7 @@ export class AdminController {
   }
 
   @Post(':userId/approve')
+  @HttpCode(HttpStatus.OK)
   approve(
     @Param('userId', ParseUUIDPipe) userId: string,
     @CurrentUser() admin: AuthUser,
@@ -43,6 +46,7 @@ export class AdminController {
   }
 
   @Post(':userId/reject')
+  @HttpCode(HttpStatus.OK)
   reject(
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body() dto: RejectKycDto,
