@@ -1,0 +1,22 @@
+[package]
+name = "campaign"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk    = { workspace = true }
+stellar-access = { workspace = true }
+stellar-macros = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk         = { workspace = true, features = ["testutils"] }
+# Real registry + token contracts, used only to exercise the cross-contract calls
+# in integration tests. They are NOT runtime deps — at runtime the Campaign calls
+# them through the locally-declared `RegistryClient` / `ShareClient` interfaces.
+compliance-registry = { path = "../compliance-registry" }
+share-token         = { path = "../share-token" }
