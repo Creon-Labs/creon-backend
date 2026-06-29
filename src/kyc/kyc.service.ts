@@ -13,10 +13,11 @@ import { SubmitKycDto } from './dto/submit-kyc.dto';
 import { UploadedFile } from './uploaded-file';
 
 /**
- * Entrepreneur KYC submission. KTP/selfie images go into the PRIVATE bucket
- * (accessed later only via short-lived presigned URLs); the profile is upserted
- * to PENDING for an admin to review. A submission is blocked while already
- * APPROVED or PENDING; after REJECTED the same row is reused.
+ * User KYC submission (entrepreneurs and investors alike — one KYC per user).
+ * KTP/selfie images go into the PRIVATE bucket (accessed later only via
+ * short-lived presigned URLs); the profile is upserted to PENDING for an admin
+ * to review. A submission is blocked while already APPROVED or PENDING; after
+ * REJECTED the same row is reused.
  */
 @Injectable()
 export class KycService {
@@ -36,7 +37,7 @@ export class KycService {
     idCard: UploadedFile,
     selfie: UploadedFile,
   ): Promise<{ status: KycStatus; submittedAt: Date }> {
-    const existing = await this.prisma.entrepreneurProfile.findUnique({
+    const existing = await this.prisma.kycProfile.findUnique({
       where: { userId },
       select: { status: true },
     });
@@ -67,7 +68,7 @@ export class KycService {
     const dateOfBirth = dto.dateOfBirth ? new Date(dto.dateOfBirth) : null;
     const submittedAt = new Date();
     try {
-      return await this.prisma.entrepreneurProfile.upsert({
+      return await this.prisma.kycProfile.upsert({
         where: { userId },
         create: {
           userId,
@@ -107,7 +108,7 @@ export class KycService {
 
   /** The caller's own KYC status (no raw object keys / admin ids exposed). */
   async getMine(userId: string) {
-    const profile = await this.prisma.entrepreneurProfile.findUnique({
+    const profile = await this.prisma.kycProfile.findUnique({
       where: { userId },
       select: {
         status: true,

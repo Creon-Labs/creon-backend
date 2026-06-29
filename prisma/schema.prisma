@@ -85,13 +85,13 @@ model User {
   investments         Investment[]
   holdings            TokenHolding[]
   distributionClaims  DistributionClaim[]
-  entrepreneurProfile EntrepreneurProfile? @relation("UserEntrepreneurProfile")
-  kycReviews          EntrepreneurProfile[] @relation("AdminKycReviews")
+  kycProfile          KycProfile?          @relation("UserKycProfile")
+  kycReviews          KycProfile[]         @relation("AdminKycReviews")
 
   @@map("users")
 }
 
-model EntrepreneurProfile {
+model KycProfile {
   id              String    @id @default(uuid()) @db.Uuid
   userId          String    @unique @map("user_id") @db.Uuid
   fullName        String    @map("full_name")
@@ -107,11 +107,11 @@ model EntrepreneurProfile {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  user       User  @relation("UserEntrepreneurProfile", fields: [userId], references: [id])
+  user       User  @relation("UserKycProfile", fields: [userId], references: [id])
   reviewedBy User? @relation("AdminKycReviews", fields: [reviewedById], references: [id])
 
   @@index([status])
-  @@map("entrepreneur_profiles")
+  @@map("kyc_profiles")
 }
 
 model Proposal {

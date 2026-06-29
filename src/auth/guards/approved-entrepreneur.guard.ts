@@ -11,7 +11,7 @@ import { AuthUser } from '../types/auth-user';
 
 /**
  * Gate routes behind a *verified* entrepreneur: the user must hold the
- * ENTREPRENEUR role AND have an {@link EntrepreneurProfile} with
+ * ENTREPRENEUR role AND have a {@link KycProfile} with
  * `status === APPROVED`. Drop this onto the proposal-submission route once it
  * exists; until then it is exported and unit-tested but unwired.
  * Must run after {@link JwtAuthGuard}.
@@ -29,7 +29,7 @@ export class ApprovedEntrepreneurGuard implements CanActivate {
       throw new ForbiddenException('Entrepreneur role required');
     }
 
-    const profile = await this.prisma.entrepreneurProfile.findUnique({
+    const profile = await this.prisma.kycProfile.findUnique({
       where: { userId: user.userId },
       select: { status: true },
     });

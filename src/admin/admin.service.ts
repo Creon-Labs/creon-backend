@@ -28,7 +28,7 @@ export class AdminService {
   }
 
   async list(status: KycStatus) {
-    const profiles = await this.prisma.entrepreneurProfile.findMany({
+    const profiles = await this.prisma.kycProfile.findMany({
       where: { status },
       orderBy: { submittedAt: 'asc' },
       select: {
@@ -40,7 +40,7 @@ export class AdminService {
         rejectionReason: true,
         idCardImageKey: true,
         selfieImageKey: true,
-        user: { select: { walletAddress: true, email: true } },
+        user: { select: { walletAddress: true, email: true, roles: true } },
       },
     });
 
@@ -54,6 +54,7 @@ export class AdminService {
         rejectionReason: p.rejectionReason,
         walletAddress: p.user.walletAddress,
         email: p.user.email,
+        roles: p.user.roles,
         idCardUrl: await this.storage.getPresignedDownloadUrl(
           p.idCardImageKey,
           PRESIGN_TTL_SECONDS,
@@ -72,7 +73,7 @@ export class AdminService {
 
   async approve(userId: string, adminId: string) {
     await this.assertPending(userId);
-    return this.prisma.entrepreneurProfile.update({
+    return this.prisma.kycProfile.update({
       where: { userId },
       data: {
         status: KycStatus.APPROVED,
@@ -86,7 +87,7 @@ export class AdminService {
 
   async reject(userId: string, adminId: string, reason: string) {
     await this.assertPending(userId);
-    return this.prisma.entrepreneurProfile.update({
+    return this.prisma.kycProfile.update({
       where: { userId },
       data: {
         status: KycStatus.REJECTED,
@@ -105,7 +106,7 @@ export class AdminService {
 
   /** A review action only applies to a profile that is awaiting review. */
   private async assertPending(userId: string): Promise<void> {
-    const profile = await this.prisma.entrepreneurProfile.findUnique({
+    const profile = await this.prisma.kycProfile.findUnique({
       where: { userId },
       select: { status: true },
     });

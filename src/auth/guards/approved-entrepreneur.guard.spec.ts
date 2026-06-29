@@ -11,7 +11,7 @@ function makeContext(user: unknown) {
 
 function makePrisma(status?: string) {
   return {
-    entrepreneurProfile: {
+    kycProfile: {
       findUnique: jest.fn(() => Promise.resolve(status ? { status } : null)),
     },
   } as unknown as PrismaService;

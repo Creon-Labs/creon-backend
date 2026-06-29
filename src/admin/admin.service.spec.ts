@@ -6,13 +6,13 @@ import { AdminService } from './admin.service';
 
 function makePrisma() {
   return {
-    entrepreneurProfile: {
+    kycProfile: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
     },
   } as unknown as PrismaService & {
-    entrepreneurProfile: {
+    kycProfile: {
       findMany: jest.Mock;
       findUnique: jest.Mock;
       update: jest.Mock;
@@ -42,7 +42,7 @@ describe('AdminService', () => {
   });
 
   it('lists submissions with presigned image URLs from the private bucket', async () => {
-    prisma.entrepreneurProfile.findMany.mockResolvedValue([
+    prisma.kycProfile.findMany.mockResolvedValue([
       {
         userId: 'u1',
         fullName: 'Budi',
@@ -52,7 +52,7 @@ describe('AdminService', () => {
         rejectionReason: null,
         idCardImageKey: 'kyc/u1/id-card.jpg',
         selfieImageKey: 'kyc/u1/selfie.jpg',
-        user: { walletAddress: 'GABC', email: 'e@x.com' },
+        user: { walletAddress: 'GABC', email: 'e@x.com', roles: ['INVESTOR'] },
       },
     ]);
 
@@ -66,23 +66,24 @@ describe('AdminService', () => {
     expect(result[0]).toMatchObject({
       userId: 'u1',
       walletAddress: 'GABC',
+      roles: ['INVESTOR'],
       idCardUrl: 'https://signed',
       selfieUrl: 'https://signed',
     });
   });
 
   it('approves a pending submission and stamps the reviewer', async () => {
-    prisma.entrepreneurProfile.findUnique.mockResolvedValue({
+    prisma.kycProfile.findUnique.mockResolvedValue({
       status: 'PENDING',
     });
-    prisma.entrepreneurProfile.update.mockResolvedValue({
+    prisma.kycProfile.update.mockResolvedValue({
       userId: 'u1',
       status: 'APPROVED',
     });
 
     await service.approve('u1', 'admin1');
 
-    expect(prisma.entrepreneurProfile.update).toHaveBeenCalledWith(
+    expect(prisma.kycProfile.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { userId: 'u1' },
         data: expect.objectContaining({
@@ -94,17 +95,17 @@ describe('AdminService', () => {
   });
 
   it('rejects a pending submission with a reason', async () => {
-    prisma.entrepreneurProfile.findUnique.mockResolvedValue({
+    prisma.kycProfile.findUnique.mockResolvedValue({
       status: 'PENDING',
     });
-    prisma.entrepreneurProfile.update.mockResolvedValue({
+    prisma.kycProfile.update.mockResolvedValue({
       userId: 'u1',
       status: 'REJECTED',
     });
 
     await service.reject('u1', 'admin1', 'blurry photo');
 
-    expect(prisma.entrepreneurProfile.update).toHaveBeenCalledWith(
+    expect(prisma.kycProfile.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           status: 'REJECTED',
@@ -115,14 +116,14 @@ describe('AdminService', () => {
   });
 
   it('404s when reviewing a missing submission', async () => {
-    prisma.entrepreneurProfile.findUnique.mockResolvedValue(null);
+    prisma.kycProfile.findUnique.mockResolvedValue(null);
     await expect(service.approve('u1', 'admin1')).rejects.toBeInstanceOf(
       NotFoundException,
     );
   });
 
   it('409s when reviewing a non-pending submission', async () => {
-    prisma.entrepreneurProfile.findUnique.mockResolvedValue({
+    prisma.kycProfile.findUnique.mockResolvedValue({
       status: 'APPROVED',
     });
     await expect(service.approve('u1', 'admin1')).rejects.toBeInstanceOf(
