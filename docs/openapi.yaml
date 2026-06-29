@@ -27,6 +27,8 @@ tags:
     description: KYC submission and status (entrepreneurs and investors)
   - name: admin
     description: Admin KYC review queue
+  - name: proposals
+    description: Entrepreneur funding proposals (off-chain draft → submit)
 
 components:
   securitySchemes:
@@ -48,6 +50,16 @@ components:
     Role:
       type: string
       enum: [ENTREPRENEUR, INVESTOR, ADMIN]
+
+    ProposalStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, UNDER_REVIEW, APPROVED, REJECTED]
+      description: |
+        - `DRAFT` – created, editable, not yet submitted
+        - `SUBMITTED` – submitted, awaiting admin review
+        - `UNDER_REVIEW` – an admin is reviewing the proposal
+        - `APPROVED` – approved by an admin (on-chain campaign creation is a later, separate flow)
+        - `REJECTED` – rejected by an admin
 
     # ── Request bodies ─────────────────────────────────────────────────────────
     ChallengeRequest:
@@ -111,6 +123,81 @@ components:
           maxLength: 500
           description: Reason shown to the entrepreneur for re-submission
           example: NIK tidak dapat diverifikasi, mohon upload ulang KTP yang jelas.
+
+    CreateProposalRequest:
+      type: object
+      required:
+        - businessName
+        - businessDescription
+        - category
+        - requestedAmount
+        - lockPeriodDays
+      properties:
+        businessName:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: Warung Kopi Nusantara
+        businessDescription:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          example: Ekspansi gerai kopi UMKM di Yogyakarta dengan modal urun dana.
+        category:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Kuliner
+        location:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: Yogyakarta
+        requestedAmount:
+          type: string
+          pattern: '^\d+(\.\d{1,7})?$'
+          description: Requested funding amount as a decimal string (up to 7 decimals, must be > 0)
+          example: "10000.0000000"
+        lockPeriodDays:
+          type: integer
+          minimum: 1
+          maximum: 3650
+          description: Capital lock period in days
+          example: 180
+
+    UpdateProposalRequest:
+      type: object
+      description: Partial update of a DRAFT proposal; every field is optional.
+      properties:
+        businessName:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: Warung Kopi Nusantara
+        businessDescription:
+          type: string
+          minLength: 1
+          maxLength: 5000
+        category:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Kuliner
+        location:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: Yogyakarta
+        requestedAmount:
+          type: string
+          pattern: '^\d+(\.\d{1,7})?$'
+          description: Requested funding amount as a decimal string (up to 7 decimals, must be > 0)
+          example: "12500.0000000"
+        lockPeriodDays:
+          type: integer
+          minimum: 1
+          maximum: 3650
+          example: 180
 
     # ── Responses ──────────────────────────────────────────────────────────────
     ChallengeResponse:
@@ -241,6 +328,54 @@ components:
           format: date-time
         rejectionReason:
           type: string
+
+    Proposal:
+      type: object
+      required:
+        - id
+        - businessName
+        - businessDescription
+        - category
+        - requestedAmount
+        - lockPeriodDays
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        businessName:
+          type: string
+          example: Warung Kopi Nusantara
+        businessDescription:
+          type: string
+          example: Ekspansi gerai kopi UMKM di Yogyakarta dengan modal urun dana.
+        category:
+          type: string
+          example: Kuliner
+        location:
+          type: [string, 'null']
+          example: Yogyakarta
+        requestedAmount:
+          type: string
+          description: Requested funding amount as a decimal string (7 decimals)
+          example: "10000.0000000"
+        lockPeriodDays:
+          type: integer
+          example: 180
+        status:
+          $ref: '#/components/schemas/ProposalStatus'
+        submittedAt:
+          type: [string, 'null']
+          format: date-time
+          description: Set when the proposal is submitted (DRAFT → SUBMITTED); null while still a draft
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
 
     ErrorResponse:
       type: object
@@ -614,6 +749,184 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: Profile is not in PENDING state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /proposals:
+    post:
+      tags: [proposals]
+      summary: Create a funding proposal (draft)
+      description: |
+        Creates a funding proposal in `DRAFT` status. Off-chain only — no on-chain
+        campaign is created at this stage. Requires the `ENTREPRENEUR` role **and**
+        an `APPROVED` KYC profile; otherwise returns **403**.
+      operationId: proposalCreate
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProposalRequest'
+      responses:
+        '201':
+          description: Proposal created in DRAFT status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proposal'
+        '400':
+          description: Validation error (e.g. requestedAmount ≤ 0)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    get:
+      tags: [proposals]
+      summary: List own proposals
+      description: |
+        Returns the authenticated entrepreneur's own proposals, newest first.
+        Requires the `ENTREPRENEUR` role.
+      operationId: proposalList
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The caller's proposals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Proposal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /proposals/{id}:
+    get:
+      tags: [proposals]
+      summary: Get one own proposal
+      description: |
+        Returns a single proposal owned by the authenticated entrepreneur. A
+        proposal that does not exist or belongs to another user returns **404**.
+      operationId: proposalGet
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the proposal
+      responses:
+        '200':
+          description: Proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proposal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [proposals]
+      summary: Edit a draft proposal
+      description: |
+        Updates fields of the caller's proposal while it is still in `DRAFT`.
+        Requires the `ENTREPRENEUR` role and an `APPROVED` KYC profile. A proposal
+        that is no longer a draft returns **409**.
+      operationId: proposalUpdate
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the proposal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProposalRequest'
+      responses:
+        '200':
+          description: Updated proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proposal'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Proposal is not a DRAFT (cannot be edited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /proposals/{id}/submit:
+    post:
+      tags: [proposals]
+      summary: Submit a draft proposal for review
+      description: |
+        Transitions the caller's proposal from `DRAFT` to `SUBMITTED` and stamps
+        `submittedAt`, queuing it for admin review. Requires the `ENTREPRENEUR`
+        role and an `APPROVED` KYC profile. A proposal that is not a `DRAFT`
+        returns **409**.
+      operationId: proposalSubmit
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the proposal
+      responses:
+        '200':
+          description: Proposal submitted (status SUBMITTED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proposal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Proposal is not a DRAFT (cannot be submitted)
           content:
             application/json:
               schema:
