@@ -4,7 +4,7 @@
 > made for the backend data & on-chain value model, and the **checklist of what
 > still needs to be built**. Keep it up to date as decisions change or work lands.
 >
-> Last updated: 2026-06-28.
+> Last updated: 2026-06-29.
 
 ## Status at a glance
 
@@ -22,7 +22,7 @@
 |---|----------|-----|--------|
 | 1 | **Prisma + PostgreSQL** as ORM/DB | Type-safe, fast migrations; Postgres fits financial data | ✅ Implemented |
 | 2 | **Wallet-based identity** (Stellar public key); email optional | Web3 product — wallet is the natural identity | ⏳ Auth flow not built |
-| 3 | **Share = restricted SEP-41 token**, non-transferable during lock, whitelist after unlock | Programmable lock/transfer rules (classic assets only allow coarse auth flags); reuses a token standard instead of a hand-rolled percentage ledger | ⏳ Contract not built |
+| 3 | **Share = restricted SEP-41 token** (permissioned). Holding is gated by a whitelist: **both `mint` (invest) and `transfer` require the recipient to be whitelisted**; non-transferable during lock, whitelist-only transfers after unlock | Programmable lock/transfer rules (classic assets only allow coarse auth flags); gating at mint **and** transfer is the only way KYC can't be bypassed by P2P-sending shares to an unregistered wallet; reuses a token standard instead of a hand-rolled percentage ledger | ⏳ Contract not built |
 | 4 | **Returns via dividends / bagi hasil** (NOT buyback) | Transparent & easy to value for retail UMKM investors; value is conserved (can't both pay cash and inflate price from the same profit) | ✅ Schema supports it |
 | 5 | **Pull-based distribution** (investors `claim()`, not push) | Pushing payouts in a loop is gas-heavy and a DoS risk; pull scales and is safe | ✅ Schema supports it |
 | 6 | **Entitlement via Merkle snapshot** (NOT an accumulator/transfer-hook token) | After unlock holders change, so ownership must be pinned to a moment. Backend snapshots balances off-chain, posts a **merkle root** on-chain; claims verify against it → trust-minimized, and the token stays standard SEP-41 | ⏳ Service not built |
@@ -31,6 +31,8 @@
 | 9 | **Ownership tracked in `TokenHolding`** (fed by an event indexer) | SEP-41 is **not enumerable on-chain** (like ERC-20). After unlock, `Investment` ≠ current ownership; the indexer rebuilds holdings from transfer/mint events | ⏳ Indexer not built |
 | 10 | **Money precision** `Decimal(28,7)`; `rewardPerShare` `Decimal(38,18)` | Matches Stellar's 7 decimals; extra precision on the per-share accumulator avoids rounding drift | ✅ Implemented |
 | 11 | **Prisma pinned to `^6`** (not 7) | Prisma 7 drops `url = env()` and requires a driver adapter + `prisma.config.ts` — deferred to avoid friction | ✅ Implemented |
+| 12 | **Shared `ComplianceRegistry` contract** holds the single whitelist; every share token queries it (not a per-token list) | One KYC → whitelisted for all campaigns; one place for the backend to add/revoke; gives a home for revocation (expired KYC / sanctions) | ⏳ Contract not built |
+| 13 | **Investor onboarding mirrors the entrepreneur flow**: wallet register → KYC → backend whitelists the address; `invest()` is whitelist-gated on-chain | Securities crowdfunding (OJK SCF) requires KYC'd investors; gating in the contract means an unregistered wallet that calls `invest()` directly is *rejected*, not merely discouraged | ⏳ Not built |
 
 ### Key distinction to remember: what "lock" actually locks
 Lock applies to **(a) withdrawing principal** and **(b) transferring the share
@@ -38,6 +40,32 @@ token** — **not** to receiving dividends. Dividends (`ProfitDistribution` /
 `DistributionClaim`) can flow during the lock and continue after unlock. After
 unlock the pool's only role would be exit/secondary market (we deferred the AMM),
 so exit is via P2P token transfer to whitelisted addresses.
+
+### Permissioned token: who may hold a share, and why invest is gated
+
+On a public chain anyone can *broadcast* a transaction; access control is whatever
+the contract *enforces*. Because Creon is securities-like (OJK SCF), **every address
+that holds a share token must be KYC'd**. We enforce this at two choke points, both
+checking a shared **`ComplianceRegistry`**:
+
+- **`invest()` / `mint`** — minting shares to an investor requires that investor's
+  wallet to be whitelisted. An unregistered wallet calling `invest()` directly is
+  **reverted**, so the website (register + KYC) is the *only* path onto the whitelist.
+- **`transfer`** — the **recipient** must be whitelisted (and during lock, transfer
+  is disabled entirely). This closes the back door where a KYC'd holder hands shares
+  to an unregistered wallet.
+
+Net effect: a share token can never land in a non-KYC'd address, whether by mint or
+transfer. This is the Soroban equivalent of a permissioned security token
+(cf. ERC-3643 / ERC-1404). Consequences:
+
+- There is **no open secondary market** — exit is P2P transfer between whitelisted
+  addresses only (an AMM pool would itself have to be whitelisted to hold the token;
+  part of why the AMM is deferred — Decision #7).
+- **Revocation** is real: removing an address from the registry (expired KYC /
+  sanctions) immediately blocks it from receiving more shares.
+- Dividend *receipt* is **not** gated, but since only whitelisted addresses can hold
+  shares, every holder in a snapshot is already KYC'd.
 
 ---
 
@@ -106,8 +134,9 @@ raw log.
 What still needs to be built, grouped by area. Check items off as they land.
 
 ### A. Soroban smart contracts
-- [ ] Campaign contract (created on proposal approval; holds campaign lifecycle).
-- [ ] **Restricted SEP-41 share token** — transfer gated by lock period + whitelist (KYC).
+- [ ] Campaign contract (created on proposal approval; holds campaign lifecycle; `invest()` checks the whitelist before minting shares).
+- [ ] **Restricted SEP-41 share token** — **`mint` and `transfer` both gated** by lock period + whitelist (KYC); recipient must be whitelisted.
+- [ ] **`ComplianceRegistry` contract** — single source-of-truth whitelist (`add` / `remove` / `is_whitelisted`); queried by share tokens at mint + transfer.
 - [ ] Vault/Escrow contract — custody of fundraised USDC, lock, release to business.
 - [ ] Distribution contract — `deposit_profit`, `set_distribution(merkleRoot)`, `claim(amount, proof)` with on-chain proof verification.
 - [ ] Test USDC asset setup on Stellar testnet.
@@ -132,13 +161,14 @@ What still needs to be built, grouped by area. Check items off as they land.
 ### E. Auth & authorization (wallet-based)
 - [ ] Challenge/nonce endpoint + Stellar signature verification → session/JWT.
 - [ ] Role guards (entrepreneur / admin / investor) over the `roles` array.
-- [ ] Whitelist/KYC management for post-unlock transfers.
+- [ ] Investor onboarding: wallet register → KYC → backend writes the address into `ComplianceRegistry` (the on-chain whitelist).
+- [ ] Whitelist/KYC management: add on approval, **revoke** on expiry/sanction; gates both invest (mint) and post-unlock transfers.
 
 ### F. API surface (NestJS modules per entity)
 - [ ] Proposals — submit, list, get (entrepreneur).
 - [ ] Reviews — approve/reject workflow (admin) → triggers on-chain deploy.
 - [ ] Campaigns — list live/locked, detail.
-- [ ] Investments — invest into a campaign, list per investor.
+- [ ] Investments — invest into a campaign (**whitelisted / KYC'd investors only**), list per investor.
 - [ ] Distributions & Claims — list entitlements, fetch proof, mark claimed.
 - [ ] Validation (DTOs), pagination, error handling.
 
