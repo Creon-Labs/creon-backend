@@ -8,6 +8,7 @@ import { CacheModule } from './cache/cache.module';
 import { AuthModule } from './auth/auth.module';
 import { KycModule } from './kyc/kyc.module';
 import { AdminModule } from './admin/admin.module';
+import { ProposalModule } from './proposal/proposal.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AdminModule } from './admin/admin.module';
     AuthModule,
     KycModule,
     AdminModule,
+    ProposalModule,
   ],
   controllers: [AppController],
   providers: [AppService],
