@@ -19,6 +19,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import type { AuthUser } from '../auth/types/auth-user';
 import { AdminService } from './admin.service';
 import { RejectKycDto } from './dto/reject-kyc.dto';
+import { RevokeKycDto } from './dto/revoke-kyc.dto';
 
 @Controller('admin/kyc')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -53,5 +54,16 @@ export class AdminController {
     @CurrentUser() admin: AuthUser,
   ) {
     return this.admin.reject(userId, admin.userId, dto.reason);
+  }
+
+  /** Revoke a previously-approved KYC (expiry/sanction); removes the wallet on-chain. */
+  @Post(':userId/revoke')
+  @HttpCode(HttpStatus.OK)
+  revoke(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: RevokeKycDto,
+    @CurrentUser() admin: AuthUser,
+  ) {
+    return this.admin.revoke(userId, admin.userId, dto.reason);
   }
 }

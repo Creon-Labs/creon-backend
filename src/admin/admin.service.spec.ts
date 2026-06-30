@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { KycWhitelistService } from '../kyc/kyc-whitelist.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { AdminService } from './admin.service';
@@ -26,6 +27,12 @@ function makeStorage() {
   } as unknown as StorageService & { getPresignedDownloadUrl: jest.Mock };
 }
 
+function makeWhitelist() {
+  return {
+    enqueue: jest.fn().mockResolvedValue(undefined),
+  } as unknown as KycWhitelistService & { enqueue: jest.Mock };
+}
+
 const config = {
   getOrThrow: () => 'creon-kyc',
 } as unknown as ConfigService;
@@ -33,12 +40,14 @@ const config = {
 describe('AdminService', () => {
   let prisma: ReturnType<typeof makePrisma>;
   let storage: ReturnType<typeof makeStorage>;
+  let whitelist: ReturnType<typeof makeWhitelist>;
   let service: AdminService;
 
   beforeEach(() => {
     prisma = makePrisma();
     storage = makeStorage();
-    service = new AdminService(prisma, storage, config);
+    whitelist = makeWhitelist();
+    service = new AdminService(prisma, storage, config, whitelist);
   });
 
   it('lists submissions with presigned image URLs from the private bucket', async () => {
@@ -91,6 +100,44 @@ describe('AdminService', () => {
           reviewedById: 'admin1',
         }) as unknown,
       }) as unknown,
+    );
+    expect(whitelist.enqueue).toHaveBeenCalledWith('u1');
+  });
+
+  it('revokes an approved submission and enqueues the on-chain remove', async () => {
+    prisma.kycProfile.findUnique.mockResolvedValue({ status: 'APPROVED' });
+    prisma.kycProfile.update.mockResolvedValue({
+      userId: 'u1',
+      status: 'REVOKED',
+    });
+
+    await service.revoke('u1', 'admin1', 'sanction list hit');
+
+    expect(prisma.kycProfile.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: 'u1' },
+        data: expect.objectContaining({
+          status: 'REVOKED',
+          reviewedById: 'admin1',
+          rejectionReason: 'sanction list hit',
+        }) as unknown,
+      }) as unknown,
+    );
+    expect(whitelist.enqueue).toHaveBeenCalledWith('u1');
+  });
+
+  it('409s when revoking a non-approved submission', async () => {
+    prisma.kycProfile.findUnique.mockResolvedValue({ status: 'PENDING' });
+    await expect(service.revoke('u1', 'admin1', 'x')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(whitelist.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('404s when revoking a missing submission', async () => {
+    prisma.kycProfile.findUnique.mockResolvedValue(null);
+    await expect(service.revoke('u1', 'admin1', 'x')).rejects.toBeInstanceOf(
+      NotFoundException,
     );
   });
 

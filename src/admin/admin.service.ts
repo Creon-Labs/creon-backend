@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { KycStatus } from '../../generated/prisma/enums';
+import { KycWhitelistService } from '../kyc/kyc-whitelist.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 
@@ -23,6 +24,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     config: ConfigService,
+    private readonly whitelist: KycWhitelistService,
   ) {
     this.kycBucket = config.getOrThrow<string>('R2_KYC_BUCKET');
   }
@@ -73,7 +75,7 @@ export class AdminService {
 
   async approve(userId: string, adminId: string) {
     await this.assertPending(userId);
-    return this.prisma.kycProfile.update({
+    const result = await this.prisma.kycProfile.update({
       where: { userId },
       data: {
         status: KycStatus.APPROVED,
@@ -83,6 +85,31 @@ export class AdminService {
       },
       select: { userId: true, status: true, reviewedAt: true },
     });
+    // Enqueue the on-chain `registry.add(wallet)` (idempotent, retried by BullMQ).
+    await this.whitelist.enqueue(userId);
+    return result;
+  }
+
+  /** Revoke a previously-approved KYC (expiry/sanction) → enqueue `registry.remove`. */
+  async revoke(userId: string, adminId: string, reason: string) {
+    await this.assertApproved(userId);
+    const result = await this.prisma.kycProfile.update({
+      where: { userId },
+      data: {
+        status: KycStatus.REVOKED,
+        reviewedById: adminId,
+        reviewedAt: new Date(),
+        rejectionReason: reason,
+      },
+      select: {
+        userId: true,
+        status: true,
+        reviewedAt: true,
+        rejectionReason: true,
+      },
+    });
+    await this.whitelist.enqueue(userId);
+    return result;
   }
 
   async reject(userId: string, adminId: string, reason: string) {
@@ -115,6 +142,20 @@ export class AdminService {
     }
     if (profile.status !== KycStatus.PENDING) {
       throw new ConflictException('KYC submission is not pending review');
+    }
+  }
+
+  /** Revocation only applies to a profile that is currently approved. */
+  private async assertApproved(userId: string): Promise<void> {
+    const profile = await this.prisma.kycProfile.findUnique({
+      where: { userId },
+      select: { status: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('KYC submission not found');
+    }
+    if (profile.status !== KycStatus.APPROVED) {
+      throw new ConflictException('KYC submission is not approved');
     }
   }
 }
