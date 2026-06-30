@@ -5,7 +5,7 @@
 > and [PROJECT.md](./PROJECT.md) (narrative). This document is the **build order**;
 > keep it checked off as work lands.
 >
-> Last updated: 2026-06-29.
+> Last updated: 2026-07-01.
 
 ## Design summary (the decisions this plan implements)
 
@@ -125,14 +125,22 @@ pending a funded `STELLAR_PLATFORM_SECRET` on testnet.)_
 **Goal:** KYC approval/revocation reflected in `ComplianceRegistry` on-chain.
 
 **Deliverables**
-- [ ] On admin KYC approve → submit `registry.add(wallet)`; persist tx hash + a
-      whitelist status on `KycProfile`.
-- [ ] Revocation path → `registry.remove(wallet)` (expiry / sanction).
-- [ ] Idempotent + retryable (don't double-add; reconcile on `tx_hash`).
-- [ ] Tests for approve→add and revoke→remove.
+- [x] On admin KYC approve → enqueue `registry.add(wallet)`; persist tx hash + a
+      whitelist status on `KycProfile`. Added `WhitelistStatus` enum + `whitelistStatus`,
+      `whitelistTxHash`/`whitelistRemoveTxHash` (both `@unique`), `whitelistError`,
+      `whitelistAttempts`. Approve only flips status + enqueues — never blocks on-chain.
+- [x] Revocation path → `registry.remove(wallet)` (expiry / sanction). New
+      `KycStatus.REVOKED` + `POST /admin/kyc/:userId/revoke` (asserts APPROVED → REVOKED → enqueue remove).
+- [x] Idempotent + retryable (don't double-add; reconcile on `tx_hash`). BullMQ
+      `kyc-whitelist` queue + `KycWhitelistService.drive` (desired state derived from KYC
+      status; no-op once synced) + `onApplicationBootstrap`/`@Interval` reconciler. On-chain
+      `add`/`remove` are themselves idempotent, so retries/double-enqueues are safe.
+- [x] Tests for approve→add and revoke→remove (`kyc-whitelist.service.spec.ts` +
+      extended `admin.service.spec.ts`; 94 unit tests green).
 
 **Acceptance:** an approved user's wallet returns `true` from `is_whitelisted`
 on-chain; a revoked one returns `false` and can no longer receive shares.
+_(Implemented + unit-tested; on-chain e2e pending a funded `STELLAR_PLATFORM_SECRET` on testnet — same caveat as Phase 2.)_
 
 **Depends on:** Phase 1 (registry live), Phase 2 (SDK wiring).
 

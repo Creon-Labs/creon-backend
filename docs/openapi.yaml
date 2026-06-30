@@ -41,11 +41,12 @@ components:
     # ── Enums ──────────────────────────────────────────────────────────────────
     KycStatus:
       type: string
-      enum: [PENDING, APPROVED, REJECTED]
+      enum: [PENDING, APPROVED, REJECTED, REVOKED]
       description: |
         - `PENDING` – awaiting admin review
-        - `APPROVED` – identity verified
+        - `APPROVED` – identity verified; the wallet is enqueued for the on-chain whitelist (`registry.add`)
         - `REJECTED` – rejected; user may resubmit
+        - `REVOKED` – a previously-approved KYC was revoked (expiry/sanction); the wallet is removed from the on-chain whitelist (`registry.remove`)
 
     Role:
       type: string
@@ -123,6 +124,17 @@ components:
           maxLength: 500
           description: Reason shown to the entrepreneur for re-submission
           example: NIK tidak dapat diverifikasi, mohon upload ulang KTP yang jelas.
+
+    RevokeRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Why the previously-approved KYC is being revoked (expiry/sanction)
+          example: Wallet flagged on sanctions screening.
 
     CreateProposalRequest:
       type: object
@@ -323,6 +335,22 @@ components:
         status:
           type: string
           enum: [REJECTED]
+        reviewedAt:
+          type: string
+          format: date-time
+        rejectionReason:
+          type: string
+
+    AdminRevokeResponse:
+      type: object
+      required: [userId, status, reviewedAt, rejectionReason]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [REVOKED]
         reviewedAt:
           type: string
           format: date-time
@@ -745,7 +773,9 @@ paths:
       tags: [admin]
       summary: Approve a KYC submission
       description: |
-        Transitions the entrepreneur's profile from `PENDING` to `APPROVED`.
+        Transitions the user's profile from `PENDING` to `APPROVED` and enqueues an
+        on-chain `ComplianceRegistry.add(wallet)` job (idempotent, retried with backoff)
+        so the wallet becomes whitelisted to invest.
         Only `PENDING` profiles can be approved — any other state returns **409**.
       operationId: adminKycApprove
       security:
@@ -824,6 +854,58 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: Profile is not in PENDING state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/kyc/{userId}/revoke:
+    post:
+      tags: [admin]
+      summary: Revoke a previously-approved KYC
+      description: |
+        Transitions the user's profile from `APPROVED` to `REVOKED` (expiry/sanction)
+        and enqueues an on-chain `ComplianceRegistry.remove(wallet)` job, after which
+        the wallet can no longer receive shares. Only `APPROVED` profiles can be
+        revoked — any other state returns **409**.
+      operationId: adminKycRevoke
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the user whose KYC is being revoked
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeRequest'
+      responses:
+        '200':
+          description: KYC revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminRevokeResponse'
+        '400':
+          description: Missing or invalid reason
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Profile is not in APPROVED state
           content:
             application/json:
               schema:
