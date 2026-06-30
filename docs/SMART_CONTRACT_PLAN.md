@@ -94,16 +94,27 @@ and persists addresses + tx hashes.
   (deploy `ShareToken` → deploy `Campaign` → `token.set_minter(campaign)` → `LIVE`).
 
 **Deliverables**
-- [ ] Stellar/Soroban SDK + RPC client wiring; platform signing key via `ConfigService`.
-- [ ] Config for registry address + `ShareToken`/`Campaign` `wasm_hash`.
-- [ ] Deploy worker/job (instantiate from `wasm_hash` + salt, then wire).
-- [ ] Persist `*_address` + `deploy_tx_hash` per step; resumable on failure.
-- [ ] Campaign deploy state machine + status transitions on the `Campaign` model.
-- [ ] Unit tests for the orchestrator (incl. partial-failure resume).
+- [x] Stellar/Soroban SDK + RPC client wiring; platform signing key via `ConfigService`.
+      (`src/soroban/SorobanService` — `deployFromWasmHash`, `invokeContract`, lazy
+      platform `Keypair`; full `@stellar/stellar-sdk` allowlisted in jest transform.)
+- [x] Config for registry address + `ShareToken`/`Campaign` `wasm_hash` (already in `.env.example`).
+- [x] Deploy worker/job (instantiate from `wasm_hash` + salt, then wire). BullMQ on
+      Valkey: `CampaignDeployProcessor` → idempotent `CampaignDeployService.drive`.
+- [x] Persist `*_address` + `deploy_tx_hash` per step; resumable on failure. Added
+      `ProjectToken.deployTxHash`, `Campaign.wireTxHash` (both `@unique`); resume point
+      derived from persisted addresses; deterministic salt + on-chain pre-check avoid duplicates.
+- [x] Campaign deploy state machine + status transitions on the `Campaign` model.
+      New `CampaignDeployStatus` enum (`PENDING→DEPLOYING_TOKEN→DEPLOYING_CAMPAIGN→WIRING→LIVE`/`FAILED`);
+      flips `CampaignStatus` to `ACTIVE` at `LIVE`.
+- [x] Unit tests for the orchestrator (incl. partial-failure resume + queueing). The
+      **deploy trigger** was also built: admin `POST /admin/proposals/:id/approve`
+      (+ `reject`, `list`) creates the Campaign mirror and enqueues the deploy.
+- [x] `onApplicationBootstrap` + periodic reconciler re-enqueue any not-yet-`LIVE` campaign.
 
 **Acceptance:** approving a proposal results in a `LIVE` campaign with token +
 campaign addresses persisted; killing the worker mid-deploy and restarting resumes
-without orphaned/duplicate contracts.
+without orphaned/duplicate contracts. _(Implemented + unit-tested; on-chain e2e
+pending a funded `STELLAR_PLATFORM_SECRET` on testnet.)_
 
 **Depends on:** Phase 1.
 

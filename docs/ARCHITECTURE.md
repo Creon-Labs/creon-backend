@@ -38,7 +38,7 @@
 | 10 | **Money precision** `Decimal(28,7)`; `rewardPerShare` `Decimal(38,18)` | Matches Stellar's 7 decimals; extra precision on the per-share accumulator avoids rounding drift | ✅ Implemented |
 | 11 | **Prisma pinned to `^6`** (not 7) | Prisma 7 drops `url = env()` and requires a driver adapter + `prisma.config.ts` — deferred to avoid friction | ✅ Implemented |
 | 12 | **Shared `ComplianceRegistry` contract** (singleton) holds the single whitelist; every share token queries it (not a per-token list) | One KYC → whitelisted for all campaigns; one place for the backend to add/revoke; gives a home for revocation (expired KYC / sanctions) | ⏳ Contract not built |
-| 13 | **Deploy orchestration is backend-driven, async + idempotent — no factory contract** | On approval the backend submits N deploy txs in sequence via a DB state machine (`APPROVED → DEPLOYING_TOKEN → DEPLOYING_CAMPAIGN → WIRING → LIVE`), resumable on partial failure (idempotent on the unique `tx_hash`). A factory adds contract-side complexity not worth it at this scale | ⏳ Not built |
+| 13 | **Deploy orchestration is backend-driven, async + idempotent — no factory contract** | On approval the backend submits N deploy txs in sequence via a DB state machine (`PENDING → DEPLOYING_TOKEN → DEPLOYING_CAMPAIGN → WIRING → LIVE`), resumable on partial failure (idempotent on the unique `tx_hash` + deterministic salt). A factory adds contract-side complexity not worth it at this scale | ✅ Built (BullMQ on Valkey; `CampaignDeployService` + `CampaignDeployStatus` enum; admin approval is the trigger) |
 | 13 | **Investor onboarding mirrors the entrepreneur flow**: wallet register → KYC → backend whitelists the address; `invest()` is whitelist-gated on-chain | Securities crowdfunding (OJK SCF) requires KYC'd investors; gating in the contract means an unregistered wallet that calls `invest()` directly is *rejected*, not merely discouraged | 🟡 Register + KYC built (shared role-agnostic `KycProfile`, `/auth/register` role INVESTOR, `/kyc` open to both roles); on-chain whitelist ⏳ |
 
 ### Key distinction to remember: what "lock" actually locks
@@ -149,9 +149,9 @@ What still needs to be built, grouped by area. Check items off as they land.
 - [x] Test USDC asset setup on Stellar testnet. _(SAC deployed; see `contracts/deployments/testnet.json`.)_
 
 ### B. On-chain integration (backend ↔ Stellar)
-- [ ] Stellar SDK / Soroban RPC client wiring + signing for platform-side txs.
-- [ ] Deploy orchestration: on approval → deploy campaign + token + vault, persist contract addresses + `deploy_tx_hash`.
-- [ ] Idempotent reconciliation keyed on `tx_hash` (schema already enforces uniqueness).
+- [x] Stellar SDK / Soroban RPC client wiring + signing for platform-side txs. (`src/soroban/SorobanService`.)
+- [x] Deploy orchestration: on approval → deploy token + campaign, wire minter, persist contract addresses + `deploy_tx_hash`/`wire_tx_hash`. (`src/campaign/`; BullMQ on Valkey.)
+- [x] Idempotent reconciliation keyed on `tx_hash` (schema enforces uniqueness) + deterministic salt + on-chain pre-check.
 
 ### C. Ownership feed (external indexer service)
 > See SMART_CONTRACT_PLAN.md Phase 5. We consume a managed indexer; no self-hosted worker.
@@ -174,7 +174,7 @@ What still needs to be built, grouped by area. Check items off as they land.
 
 ### F. API surface (NestJS modules per entity)
 - [ ] Proposals — submit, list, get (entrepreneur).
-- [ ] Reviews — approve/reject workflow (admin) → triggers on-chain deploy.
+- [x] Reviews — approve/reject workflow (admin) → triggers on-chain deploy. (`POST /admin/proposals/:id/approve|reject`.)
 - [ ] Campaigns — list live/locked, detail.
 - [ ] Investments — invest into a campaign (**whitelisted / KYC'd investors only**), list per investor.
 - [ ] Distributions & Claims — list entitlements, fetch proof, mark claimed.
