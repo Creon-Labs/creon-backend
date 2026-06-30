@@ -26,7 +26,7 @@ tags:
   - name: kyc
     description: KYC submission and status (entrepreneurs and investors)
   - name: admin
-    description: Admin KYC review queue
+    description: Admin review queues — KYC and funding proposals
   - name: proposals
     description: Entrepreneur funding proposals (off-chain draft → submit)
 
@@ -58,7 +58,7 @@ components:
         - `DRAFT` – created, editable, not yet submitted
         - `SUBMITTED` – submitted, awaiting admin review
         - `UNDER_REVIEW` – an admin is reviewing the proposal
-        - `APPROVED` – approved by an admin (on-chain campaign creation is a later, separate flow)
+        - `APPROVED` – approved by an admin; creates the campaign mirror and enqueues its on-chain deploy
         - `REJECTED` – rejected by an admin
 
     # ── Request bodies ─────────────────────────────────────────────────────────
@@ -328,6 +328,81 @@ components:
           format: date-time
         rejectionReason:
           type: string
+
+    AdminProposalItem:
+      type: object
+      required:
+        - id
+        - businessName
+        - category
+        - requestedAmount
+        - lockPeriodDays
+        - status
+        - entrepreneur
+      properties:
+        id:
+          type: string
+          format: uuid
+        businessName:
+          type: string
+          example: Warung Kopi Nusantara
+        category:
+          type: string
+          example: Kuliner
+        location:
+          type: [string, 'null']
+          example: Yogyakarta
+        requestedAmount:
+          type: string
+          description: Requested funding amount as a decimal string (7 decimals)
+          example: "10000.0000000"
+        lockPeriodDays:
+          type: integer
+          example: 180
+        status:
+          $ref: '#/components/schemas/ProposalStatus'
+        submittedAt:
+          type: [string, 'null']
+          format: date-time
+        entrepreneur:
+          type: object
+          required: [walletAddress]
+          properties:
+            walletAddress:
+              type: string
+              minLength: 56
+              maxLength: 56
+            email:
+              type: [string, 'null']
+              format: email
+
+    AdminApproveProposalResponse:
+      type: object
+      required: [proposalId, status, campaignId]
+      properties:
+        proposalId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [APPROVED]
+        campaignId:
+          type: string
+          format: uuid
+          description: |
+            The created campaign. Its on-chain contracts (ShareToken + Campaign)
+            deploy asynchronously in the background — poll campaign status for progress.
+
+    AdminRejectProposalResponse:
+      type: object
+      required: [proposalId, status]
+      properties:
+        proposalId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [REJECTED]
 
     Proposal:
       type: object
@@ -749,6 +824,138 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: Profile is not in PENDING state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/proposals:
+    get:
+      tags: [admin]
+      summary: List proposals for review
+      description: |
+        Returns proposals filtered by status for the admin review queue, oldest
+        submission first. Defaults to `SUBMITTED`. Requires the `ADMIN` role.
+      operationId: adminProposalList
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ProposalStatus'
+          description: Filter by proposal status (default `SUBMITTED`)
+      responses:
+        '200':
+          description: List of proposals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminProposalItem'
+        '400':
+          description: Invalid status value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/proposals/{id}/approve:
+    post:
+      tags: [admin]
+      summary: Approve a proposal
+      description: |
+        Approves a `SUBMITTED` or `UNDER_REVIEW` proposal: records an admin review,
+        transitions the proposal to `APPROVED`, creates its off-chain campaign
+        mirror, and **enqueues the asynchronous on-chain deploy** of the campaign's
+        ShareToken + Campaign contracts. The deploy runs in the background; the
+        returned `campaignId` can be polled for live status. Requires the `ADMIN` role.
+
+        Only a `SUBMITTED`/`UNDER_REVIEW` proposal can be approved — any other state
+        returns **409**.
+      operationId: adminProposalApprove
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the proposal to approve
+      responses:
+        '200':
+          description: Proposal approved; campaign created and deploy enqueued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminApproveProposalResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Proposal is not in a reviewable (SUBMITTED/UNDER_REVIEW) state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/proposals/{id}/reject:
+    post:
+      tags: [admin]
+      summary: Reject a proposal
+      description: |
+        Rejects a `SUBMITTED` or `UNDER_REVIEW` proposal with a reason and records an
+        admin review. No campaign is created. Requires the `ADMIN` role. Only a
+        `SUBMITTED`/`UNDER_REVIEW` proposal can be rejected — any other state returns **409**.
+      operationId: adminProposalReject
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the proposal to reject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectRequest'
+      responses:
+        '200':
+          description: Proposal rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminRejectProposalResponse'
+        '400':
+          description: Missing or invalid reason
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Proposal is not in a reviewable (SUBMITTED/UNDER_REVIEW) state
           content:
             application/json:
               schema:
