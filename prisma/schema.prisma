@@ -44,6 +44,18 @@ enum CampaignStatus {
   CANCELLED
 }
 
+// Deploy state machine for a campaign's on-chain contracts (separate from the
+// funding-lifecycle CampaignStatus). Drives the idempotent, resumable orchestrator:
+// PENDING -> DEPLOYING_TOKEN -> DEPLOYING_CAMPAIGN -> WIRING -> LIVE (FAILED on error).
+enum CampaignDeployStatus {
+  PENDING
+  DEPLOYING_TOKEN
+  DEPLOYING_CAMPAIGN
+  WIRING
+  LIVE
+  FAILED
+}
+
 enum VaultStatus {
   PENDING
   FUNDING
@@ -163,7 +175,11 @@ model Campaign {
   lockEndAt       DateTime?      @map("lock_end_at") @db.Timestamptz
   startAt         DateTime?      @map("start_at") @db.Timestamptz
   endAt           DateTime?      @map("end_at") @db.Timestamptz
-  deployTxHash    String?        @map("deploy_tx_hash") @db.VarChar(64)
+  deployStatus    CampaignDeployStatus @default(PENDING) @map("deploy_status")
+  deployTxHash    String?        @unique @map("deploy_tx_hash") @db.VarChar(64)
+  wireTxHash      String?        @unique @map("wire_tx_hash") @db.VarChar(64)
+  deployError     String?        @map("deploy_error") @db.Text
+  deployAttempts  Int            @default(0) @map("deploy_attempts")
   createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -184,6 +200,7 @@ model ProjectToken {
   assetCode       String   @map("asset_code") @db.VarChar(12)
   issuerAddress   String?  @map("issuer_address") @db.VarChar(56)
   contractAddress String?  @map("contract_address") @db.VarChar(56)
+  deployTxHash    String?  @unique @map("deploy_tx_hash") @db.VarChar(64)
   totalSupply     Decimal? @map("total_supply") @db.Decimal(28, 7)
   isTransferable  Boolean  @default(false) @map("is_transferable")
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
