@@ -20,6 +20,19 @@ enum KycStatus {
   PENDING
   APPROVED
   REJECTED
+  REVOKED // was APPROVED, now removed from the on-chain whitelist (expiry/sanction)
+}
+
+// On-chain ComplianceRegistry sync state for a KycProfile's wallet, separate from
+// the KYC review status. Drives the idempotent, resumable whitelist orchestrator:
+// NOT_SYNCED -> ADDING -> WHITELISTED ; WHITELISTED -> REMOVING -> REMOVED (FAILED on error).
+enum WhitelistStatus {
+  NOT_SYNCED
+  ADDING
+  WHITELISTED
+  REMOVING
+  REMOVED
+  FAILED
 }
 
 enum ProposalStatus {
@@ -116,13 +129,22 @@ model KycProfile {
   reviewedById    String?   @map("reviewed_by_id") @db.Uuid
   reviewedAt      DateTime? @map("reviewed_at") @db.Timestamptz
   rejectionReason String?   @map("rejection_reason") @db.Text
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // On-chain whitelist sync (ComplianceRegistry add/remove). tx_hash unique = idempotent reconcile.
+  whitelistStatus       WhitelistStatus @default(NOT_SYNCED) @map("whitelist_status")
+  whitelistTxHash       String?         @unique @map("whitelist_tx_hash") @db.VarChar(64)
+  whitelistRemoveTxHash String?         @unique @map("whitelist_remove_tx_hash") @db.VarChar(64)
+  whitelistError        String?         @map("whitelist_error") @db.Text
+  whitelistAttempts     Int             @default(0) @map("whitelist_attempts")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   user       User  @relation("UserKycProfile", fields: [userId], references: [id])
   reviewedBy User? @relation("AdminKycReviews", fields: [reviewedById], references: [id])
 
   @@index([status])
+  @@index([whitelistStatus])
   @@map("kyc_profiles")
 }
 
