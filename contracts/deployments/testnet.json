@@ -2,27 +2,14 @@
   "network": "testnet",
   "networkPassphrase": "Test SDF Network ; September 2015",
   "rpcUrl": "https://soroban-testnet.stellar.org",
-  "deployedAt": "2026-06-29T13:44:37Z",
-  "deployerPublicKey": "GCHPJMNH7WWIHX7CY5CKWR3I35A5DK4X6IU7CJSFUDHTBEWWMI6VEHFJ",
+  "deployedAt": "2026-07-01T01:16:14Z",
+  "deployerPublicKey": "GDXTJXOSJOEHZ6VLIYB35ON2YM3FYH6AYIFJ7YHFNCANALD35HTXZ6MR",
 
-  "complianceRegistryAddress": "CCTB7KFSZCWSIB3UGYTSDO5PBWMTKD5XCDIEGIEAYVPZSH5K3S5RANQ7",
+  "complianceRegistryAddress": "CDDYCTY4BP7RMNDT5SQQMOHS6FZ5MKVPB4LIVON6MONBD2L6GWCJZ2YF",
   "shareTokenWasmHash": "ae06cdbb78077ef8557d86778ffe5a2a2f5d08829245b61a76ad8f93944571fb",
   "campaignWasmHash": "462eb8f08bbd4f19b1c67e7b278aadf507b2a661455cb81a368a954e794a51aa",
-  "usdcSacAddress": "CDZZZYLS6OFIPUHQC2YBH53FDMWXQU5VVCGVYMCNHBHL6LAUHMOS4TH7",
-  "usdcAsset": "USDC:GCHPJMNH7WWIHX7CY5CKWR3I35A5DK4X6IU7CJSFUDHTBEWWMI6VEHFJ",
+  "usdcSacAddress": "CA6NVKD2EVIK73B4YH6JO4XKA2GLGTN222VTOGXAZVNT5QHKLAT3O7N3",
+  "usdcAsset": "USDC:GDXTJXOSJOEHZ6VLIYB35ON2YM3FYH6AYIFJ7YHFNCANALD35HTXZ6MR",
 
-  "_comment": "ComplianceRegistry is the live singleton. ShareToken + Campaign are uploaded (WASM hashes); per-campaign instances are deployed from these hashes in Phase 2. The instances below were deployed only to smoke-test acceptance on testnet and are not used by the backend.",
-  "smokeTest": {
-    "demoShareTokenMinterDeployer": "CD7UG4NM7OX2X56GYQKIA445Y2N4NRJ6P3SYU2UYFOZ7ENI5WNWZZ3EK",
-    "demoCampaignShareToken": "CBTSLBX5YKYMOCUAOFC5EI6DNF5XTY7GAWR5KXRJRWAGBZJOGI5FM475",
-    "demoCampaign": "CCETG5M7CA34AZDEKO2ILME7FXUQDHW2OFFK5Z4JPRI6UZYLRKCUOJFE",
-    "results": [
-      "registry: is_whitelisted false -> add -> true -> remove -> false",
-      "mint to non-whitelisted: reverted",
-      "mint to whitelisted: succeeded (balance 1000)",
-      "transfer while locked: reverted",
-      "invest by non-whitelisted: reverted",
-      "forged merkle claim: rejected"
-    ]
-  }
+  "_comment": "ComplianceRegistry is the live singleton (owner = deployerPublicKey / the backend platform key). ShareToken + Campaign are uploaded (WASM hashes); per-campaign instances are deployed from these hashes by the backend. USDC is a test SAC whose asset is issued by deployerPublicKey."
 }
