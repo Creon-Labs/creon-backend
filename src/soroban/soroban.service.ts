@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  Account,
   Address,
   FeeBumpTransaction,
   Keypair,
@@ -22,6 +23,16 @@ export interface DeployResult {
   txHash: string | null;
 }
 
+/** A ShareToken event reduced to what the ownership indexer needs: which token
+ *  emitted it and which holder addresses it touched. Amounts are deliberately
+ *  omitted — the indexer re-reads each balance on-chain rather than trusting the
+ *  event body. */
+export interface TokenEvent {
+  contractId: string;
+  addresses: string[];
+  ledger: number;
+}
+
 /**
  * Thin wrapper around the Soroban RPC + transaction-building surface of
  * `@stellar/stellar-sdk`, mirroring the {@link CacheService}/{@link StorageService}
@@ -40,6 +51,11 @@ export interface DeployResult {
  */
 @Injectable()
 export class SorobanService {
+  /** RPC caps a getEvents request at 5 contract filters. */
+  private static readonly MAX_CONTRACT_FILTERS = 5;
+  /** Page size for getEvents cursor pagination. */
+  private static readonly EVENTS_PAGE_LIMIT = 200;
+
   private readonly logger = new Logger(SorobanService.name);
   private readonly server: rpc.Server;
   private readonly networkPassphrase: string;
@@ -278,6 +294,131 @@ export class SorobanService {
   /** Read an ScVal `i128` back to a bigint (stroops). */
   readI128(value: xdr.ScVal): bigint {
     return scValToNative(value) as bigint;
+  }
+
+  // ---- read-only (simulation) helpers — used by the ownership indexer ----
+
+  /** The network's latest ledger sequence — used to seed the indexer cursor on a
+   *  cold start (no signing, read-only). */
+  async latestLedger(): Promise<number> {
+    const { sequence } = await this.server.getLatestLedger();
+    return sequence;
+  }
+
+  /**
+   * Simulate a contract call read-only (no signing, no submit) and return the raw
+   * ScVal it produced. Any source works for a read, so we use a synthetic account
+   * (no network round-trip, no requirement that the platform account exist).
+   */
+  async simulateRead(
+    contractId: string,
+    func: string,
+    args: xdr.ScVal[],
+  ): Promise<xdr.ScVal> {
+    const tx = new TransactionBuilder(
+      new Account(this.platformPublicKey, '0'),
+      {
+        fee: this.fee,
+        networkPassphrase: this.networkPassphrase,
+      },
+    )
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: contractId,
+          function: func,
+          args,
+        }),
+      )
+      .setTimeout(60)
+      .build();
+
+    const sim = await this.server.simulateTransaction(tx);
+    if (!rpc.Api.isSimulationSuccess(sim) || !sim.result) {
+      const detail = rpc.Api.isSimulationError(sim)
+        ? sim.error
+        : JSON.stringify(sim);
+      throw new Error(`simulate ${contractId}.${func} failed: ${detail}`);
+    }
+    return sim.result.retval;
+  }
+
+  /** Read a ShareToken `balance(address)` as a bigint (stroops), read-only. This is
+   *  the ownership source of truth — the indexer always re-reads it rather than
+   *  decoding a value out of an event. */
+  async readBalance(contractId: string, address: string): Promise<bigint> {
+    const retval = await this.simulateRead(contractId, 'balance', [
+      this.addressArg(address),
+    ]);
+    return this.readI128(retval);
+  }
+
+  /**
+   * Fetch ShareToken events emitted by `contractIds` from `startLedger` onward,
+   * transparently handling the RPC's 5-contract filter cap (chunking) and its page
+   * `limit` (cursor pagination). Each returned {@link TokenEvent} carries only the
+   * addresses appearing in the event topics; the merged `latestLedger` lets the
+   * caller advance its cursor even when no events matched. Read-only.
+   */
+  async getContractEvents(
+    contractIds: string[],
+    startLedger: number,
+  ): Promise<{ events: TokenEvent[]; latestLedger: number }> {
+    const events: TokenEvent[] = [];
+    let latestLedger = startLedger;
+
+    for (
+      let i = 0;
+      i < contractIds.length;
+      i += SorobanService.MAX_CONTRACT_FILTERS
+    ) {
+      const chunk = contractIds.slice(
+        i,
+        i + SorobanService.MAX_CONTRACT_FILTERS,
+      );
+      const filters: rpc.Api.EventFilter[] = [
+        { type: 'contract', contractIds: chunk },
+      ];
+      let request: rpc.Api.GetEventsRequest = {
+        filters,
+        startLedger,
+        limit: SorobanService.EVENTS_PAGE_LIMIT,
+      };
+      for (;;) {
+        const res = await this.server.getEvents(request);
+        for (const e of res.events) {
+          events.push({
+            contractId: e.contractId?.contractId() ?? '',
+            addresses: this.addressesInTopics(e.topic),
+            ledger: e.ledger,
+          });
+        }
+        latestLedger = Math.max(latestLedger, res.latestLedger);
+        if (
+          res.events.length < SorobanService.EVENTS_PAGE_LIMIT ||
+          !res.cursor
+        ) {
+          break;
+        }
+        request = {
+          filters,
+          cursor: res.cursor,
+          limit: SorobanService.EVENTS_PAGE_LIMIT,
+        };
+      }
+    }
+    return { events, latestLedger };
+  }
+
+  /** The `C…`/`G…` addresses appearing in an event's topics (by ScVal type, so the
+   *  leading `transfer`/`mint` symbol and any amount are ignored). */
+  private addressesInTopics(topics: xdr.ScVal[]): string[] {
+    const out: string[] = [];
+    for (const topic of topics) {
+      if (topic.switch() === xdr.ScValType.scvAddress()) {
+        out.push(Address.fromScVal(topic).toString());
+      }
+    }
+    return out;
   }
 
   /** Build → simulate/assemble → sign → send → poll to a final status. */

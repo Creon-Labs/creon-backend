@@ -1,9 +1,16 @@
 import { ConfigService } from '@nestjs/config';
-import { Account, Address, Keypair } from '@stellar/stellar-sdk';
+import {
+  Account,
+  Address,
+  Contract,
+  Keypair,
+  nativeToScVal,
+} from '@stellar/stellar-sdk';
 import { SorobanService } from './soroban.service';
 
 const PASSPHRASE = 'Test SDF Network ; September 2015';
 const DEPLOYER = 'GCHPJMNH7WWIHX7CY5CKWR3I35A5DK4X6IU7CJSFUDHTBEWWMI6VEHFJ';
+const HOLDER = 'GCUQRLMIYPTNGYQBEN6P6HMTDAETLKYEQORMQWV7SKNTX7XDDNN3OCBY';
 const SOME_CONTRACT =
   'CCTB7KFSZCWSIB3UGYTSDO5PBWMTKD5XCDIEGIEAYVPZSH5K3S5RANQ7';
 
@@ -108,7 +115,98 @@ describe('SorobanService', () => {
       expect(res.txHash).toBe('txhash123');
     });
   });
+
+  describe('read-only helpers (indexer)', () => {
+    it('latestLedger returns the network ledger sequence', async () => {
+      const service = makeService(Keypair.random().secret());
+      rawServer(service).getLatestLedger = jest
+        .fn()
+        .mockResolvedValue({ sequence: 4242 });
+
+      await expect(service.latestLedger()).resolves.toBe(4242);
+    });
+
+    it('readBalance simulates balance(address) and decodes the i128', async () => {
+      const service = makeService(Keypair.random().secret());
+      rawServer(service).simulateTransaction = jest.fn().mockResolvedValue({
+        transactionData: {},
+        result: { retval: service.i128Arg(50_0000000n) },
+      });
+
+      await expect(service.readBalance(SOME_CONTRACT, HOLDER)).resolves.toBe(
+        50_0000000n,
+      );
+    });
+
+    it('readBalance throws on a failed simulation', async () => {
+      const service = makeService(Keypair.random().secret());
+      rawServer(service).simulateTransaction = jest
+        .fn()
+        .mockResolvedValue({ error: 'boom' });
+
+      await expect(service.readBalance(SOME_CONTRACT, HOLDER)).rejects.toThrow(
+        /boom/,
+      );
+    });
+
+    it('getContractEvents extracts topic addresses and maps the emitting contract', async () => {
+      const service = makeService(Keypair.random().secret());
+      rawServer(service).getEvents = jest.fn().mockResolvedValue({
+        latestLedger: 900,
+        cursor: 'c1',
+        events: [
+          {
+            ledger: 880,
+            contractId: new Contract(SOME_CONTRACT),
+            // ["transfer", from, to] — only the two addresses survive.
+            topic: [
+              nativeToScVal('transfer', { type: 'symbol' }),
+              Address.fromString(DEPLOYER).toScVal(),
+              Address.fromString(HOLDER).toScVal(),
+            ],
+            value: service.i128Arg(1n),
+          },
+        ],
+      });
+
+      const { events, latestLedger } = await service.getContractEvents(
+        [SOME_CONTRACT],
+        800,
+      );
+
+      expect(latestLedger).toBe(900);
+      expect(events).toHaveLength(1);
+      expect(events[0].contractId).toBe(SOME_CONTRACT);
+      expect(events[0].addresses).toEqual([DEPLOYER, HOLDER]);
+      expect(events[0].ledger).toBe(880);
+    });
+
+    it('getContractEvents chunks >5 contracts into separate RPC requests', async () => {
+      const service = makeService(Keypair.random().secret());
+      const getEvents = jest
+        .fn()
+        .mockResolvedValue({ latestLedger: 100, cursor: '', events: [] });
+      rawServer(service).getEvents = getEvents;
+
+      // 6 contract ids → 2 chunks (5 + 1).
+      const ids = Array.from({ length: 6 }, () => SOME_CONTRACT);
+      await service.getContractEvents(ids, 50);
+
+      expect(getEvents).toHaveBeenCalledTimes(2);
+      const req = (call: number) =>
+        (getEvents.mock.calls as unknown[][])[call][0] as {
+          filters: { contractIds: string[] }[];
+        };
+      expect(req(0).filters[0].contractIds).toHaveLength(5);
+      expect(req(1).filters[0].contractIds).toHaveLength(1);
+    });
+  });
 });
+
+/** Reach the private, real rpc.Server so a test can stub individual RPC methods. */
+function rawServer(service: SorobanService): Record<string, jest.Mock> {
+  return (service as unknown as { server: Record<string, jest.Mock> }).server;
+}
 
 /** Stub the network layer so submit() flows through build → prepare → send → poll. */
 function mockServer(
