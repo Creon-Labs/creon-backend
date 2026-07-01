@@ -208,21 +208,29 @@ since SEP-41 is not enumerable on-chain — no third-party indexer, no webhooks.
   cursor is missing).
 
 **Deliverables**
-- [ ] `SorobanService.getEvents` — wraps `rpc.Server.getEvents({ startLedger, filters })`.
-- [ ] `SorobanService.balance` (or reuse `invokeContract`/`readI128`) — read-only
-      `balance(address)` call against a `ShareToken` contract.
-- [ ] `TokenHoldingIndexerService` (new, e.g. `src/indexer/`): `@Interval` poll loop +
+- [x] `SorobanService.getContractEvents` — wraps `rpc.Server.getEvents`, chunking the
+      LIVE-token set to the RPC's 5-contract cap and paginating each chunk on its cursor;
+      returns `{ events, latestLedger }`, each event reduced to the addresses in its topics
+      (amounts dropped). Plus `latestLedger()` (cursor seed).
+- [x] `SorobanService.readBalance` (via read-only `simulateRead` + `readI128`) — read-only
+      `balance(address)` call against a `ShareToken` contract, no signing/submit.
+- [x] `TokenHoldingIndexerService` (new, `src/indexer/`): `@Interval` poll loop +
       `onApplicationBootstrap`; reads/writes the ledger cursor in `CacheService`; queries
-      `LIVE` campaigns for the set of `ShareToken` addresses to filter on.
-- [ ] Reconcile events → for each touched `(campaignId, holderAddress)`, `balance()` read
-      → upsert `TokenHolding` (unique on `campaignId, holderAddress`).
-- [ ] Backfill path for first run / gaps (e.g. seed the cursor from the earliest `LIVE`
-      campaign's wire ledger, or a configurable lookback).
-- [ ] Tests for the poll loop (event → balance → upsert), cursor persistence, and
-      resume-after-restart behavior.
+      `LIVE` campaigns for the set of `ShareToken` addresses to filter on. Plain service (no
+      BullMQ) with an in-flight guard; the cursor only advances on a fully successful poll.
+- [x] Reconcile events → for each touched `(campaignId, holderAddress)`, fresh `balance()`
+      read → upsert `TokenHolding` (unique on `campaignId, holderAddress`); `holderId`
+      resolved from `walletAddress` (null for unregistered addresses).
+- [x] Backfill path for first run / gaps: on a missing cursor, seed from
+      `latestLedger − INDEXER_LOOKBACK_LEDGERS` (configurable, default ~1 day).
+- [x] Tests for the poll loop (event → balance → upsert), dedupe, cursor persistence,
+      cold-start seeding, and no-advance-on-failure behavior (`token-holding-indexer.service.spec.ts`
+      + extended `soroban.service.spec.ts`).
 
 **Acceptance:** after an on-chain transfer/investment, `TokenHolding` matches the
 contract's real `balance()` for the affected addresses within one poll interval.
+_(Implemented + unit-tested; on-chain e2e pending a funded `STELLAR_PLATFORM_SECRET` +
+real transfers to observe — same caveat as Phases 2–4.)_
 
 **Depends on:** Phase 1 (token deployed), Phase 4 (real transfers to observe).
 

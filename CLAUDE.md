@@ -11,14 +11,15 @@ become on-chain campaigns that investors fund with USDC. Returns flow back as
 **dividends (bagi hasil)**, not buyback. See `docs/PROJECT.md` (narrative) and
 `docs/ARCHITECTURE.md` (decisions + roadmap) for the full domain model.
 
-Status: persistence, wallet-auth, KYC/admin-approval, entrepreneur proposals, and
-**on-chain integration through campaign deploy** are built. The Soroban contracts
+Status: persistence, wallet-auth, KYC/admin-approval, entrepreneur proposals,
+**on-chain integration through campaign deploy**, investment recording, and the
+**ownership indexer** (rebuilds `TokenHolding`) are built. The Soroban contracts
 (`contracts/`) are deployed to **testnet**; the backend deploys a per-campaign
 `ShareToken` + `Campaign` on proposal approval and syncs KYC approvals into the
 on-chain whitelist — both as idempotent BullMQ orchestrators. Still **not built**:
-the event indexer (which rebuilds `TokenHolding`), investment recording, and the
-end-to-end dividend distribution/claim flow. See `docs/ARCHITECTURE.md` (roadmap)
-and `docs/SMART_CONTRACT_PLAN.md` (phased plan) — Phases 1–2 are done.
+the end-to-end dividend distribution/claim flow (Merkle snapshots). See
+`docs/ARCHITECTURE.md` (roadmap) and `docs/SMART_CONTRACT_PLAN.md` (phased plan) —
+Phases 1–5 are done; Phase 6 (dividends) remains.
 
 ## Commands
 
@@ -91,7 +92,8 @@ NestJS module-per-domain. `app.module.ts` wires: `ConfigModule` (global),
 Valkey/BullMQ connection + `defaultJobOptions`: 5 attempts, exponential 5 s backoff,
 `removeOnComplete`), then `PrismaModule` (global), `StorageModule`, `CacheModule`
 (global), `SorobanModule`, `AuthModule`, `KycModule`, `AdminModule`,
-`ProposalModule`, `CampaignModule`. `main.ts` installs a global `ValidationPipe`
+`ProposalModule`, `CampaignModule`, `InvestmentModule`, `IndexerModule`. `main.ts`
+installs a global `ValidationPipe`
 (`whitelist + transform`) and a `BigInt.prototype.toJSON` patch so Prisma
 ledger-sequence fields serialize to JSON.
 
@@ -172,6 +174,17 @@ ledger-sequence fields serialize to JSON.
   the KYC review status** — APPROVED → `registry.add(wallet)` → WHITELISTED, REVOKED
   → `registry.remove(wallet)` → REMOVED. On-chain add/remove are themselves
   idempotent, so a duplicate job can't corrupt state.
+
+**Ownership indexer** (`src/indexer/`, `TokenHoldingIndexerService`) — the one
+non-BullMQ loop: a plain `@Interval` (+ `onApplicationBootstrap`) poll, since there's
+no per-entity retry, just a continuous cursor. Each tick asks `SorobanService.getContractEvents`
+(read-only `getEvents`, chunked to the RPC's 5-contract cap) which addresses each
+`LIVE` `ShareToken` touched since the last processed ledger, then writes a **fresh
+on-chain `readBalance()`** (read-only simulation) into `TokenHolding` — the balance is
+never decoded from the event body, so a mis-parsed event can't corrupt the ledger. The
+ledger cursor lives in Valkey via `CacheService` (no migration); it **only advances on a
+fully successful poll**, so a failed tick just re-reads the same window. Cold start seeds
+a bounded lookback (`INDEXER_LOOKBACK_LEDGERS`) from the latest ledger.
 
 **Soroban contracts** (`contracts/`, standalone Cargo workspace) — deployed to
 testnet; addresses + WASM hashes live in `contracts/deployments/testnet.json` and
