@@ -2,13 +2,16 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   Address,
+  FeeBumpTransaction,
   Keypair,
   Operation,
   StrKey,
+  Transaction,
   TransactionBuilder,
   hash,
   nativeToScVal,
   rpc,
+  scValToNative,
   xdr,
 } from '@stellar/stellar-sdk';
 
@@ -109,6 +112,109 @@ export class SorobanService {
     return { txHash };
   }
 
+  /**
+   * Build a contract invocation **sourced at `source`** (not the platform),
+   * simulate/assemble it, and return the unsigned prepared **XDR** for a client
+   * wallet to sign. Used by the investment flow: `invest()` requires the
+   * investor's own auth (and pulls their USDC), so the investor must be the
+   * source and signer — the platform can only sponsor the fee (see
+   * {@link submitSignedTransaction}). Because the investor is the source, a
+   * single envelope signature covers both the top-level call and the inner
+   * `usdc.transfer` auth.
+   */
+  async buildInvokeTransaction(
+    source: string,
+    contractId: string,
+    func: string,
+    args: xdr.ScVal[],
+  ): Promise<string> {
+    const account = await this.server.getAccount(source);
+    const tx = new TransactionBuilder(account, {
+      fee: this.fee,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: contractId,
+          function: func,
+          args,
+        }),
+      )
+      // Generous window so the investor has time to sign in their wallet.
+      .setTimeout(300)
+      .build();
+
+    const prepared = await this.server.prepareTransaction(tx);
+    return prepared.toXDR();
+  }
+
+  /**
+   * Submit an investor-signed inner transaction, wrapped in a **platform
+   * fee-bump** so the platform pays the fee (the investor needs only USDC, not
+   * XLM). A fee-bump does *not* consume the fee-source's sequence number — only
+   * the inner tx's source (the investor) does — so concurrent investments never
+   * contend on the platform account's sequence. Returns the submitted tx hash.
+   */
+  async submitSignedTransaction(signedXdr: string): Promise<{
+    txHash: string;
+    result: rpc.Api.GetSuccessfulTransactionResponse;
+  }> {
+    const platform = this.platform();
+    const inner = TransactionBuilder.fromXDR(signedXdr, this.networkPassphrase);
+    if (!(inner instanceof Transaction)) {
+      throw new Error('Expected a signed inner transaction, got a fee-bump');
+    }
+    // baseFee = inner fee guarantees the fee-bump's total (baseFee × (ops+1))
+    // clears the inner fee and the network minimum.
+    const feeBump = TransactionBuilder.buildFeeBumpTransaction(
+      platform,
+      inner.fee,
+      inner,
+      this.networkPassphrase,
+    );
+    feeBump.sign(platform);
+    const { result } = await this.sendAndPoll(feeBump);
+    // Return the *inner* hash — stable across resubmits and what explorers show
+    // for the investor's transaction (the fee-bump hash is the platform's).
+    const txHash = inner.hash().toString('hex');
+    this.logger.log(`Submitted investor tx (fee-bumped) inner tx ${txHash}`);
+    return { result, txHash };
+  }
+
+  /** The transaction hash of a signed/unsigned tx XDR, hex-encoded. Stable across
+   *  resubmits, so it doubles as an idempotency key for a client-submitted tx. */
+  transactionHash(xdrString: string): string {
+    const tx = TransactionBuilder.fromXDR(xdrString, this.networkPassphrase);
+    return tx.hash().toString('hex');
+  }
+
+  /**
+   * Decode the first `InvokeHostFunction` op of a (signed or unsigned) tx XDR
+   * into its target contract, function name, and raw ScVal args — so callers can
+   * verify a client-submitted tx really invokes the expected contract/function
+   * before submitting it. Throws if the tx is not a contract invocation.
+   */
+  decodeInvokeContract(xdrString: string): {
+    contractAddress: string;
+    functionName: string;
+    args: xdr.ScVal[];
+  } {
+    const tx = TransactionBuilder.fromXDR(xdrString, this.networkPassphrase);
+    if (!(tx instanceof Transaction)) {
+      throw new Error('Expected a transaction envelope, got a fee-bump');
+    }
+    const op = tx.operations[0];
+    if (!op || op.type !== 'invokeHostFunction') {
+      throw new Error('Transaction is not a contract invocation');
+    }
+    const ic = op.func.invokeContract();
+    return {
+      contractAddress: Address.fromScAddress(ic.contractAddress()).toString(),
+      functionName: ic.functionName().toString(),
+      args: ic.args(),
+    };
+  }
+
   /** Whether a contract instance exists on-chain (idempotent-recovery probe). */
   async contractExists(contractId: string): Promise<boolean> {
     const key = xdr.LedgerKey.contractData(
@@ -164,6 +270,16 @@ export class SorobanService {
     return nativeToScVal(value, { type: 'u64' });
   }
 
+  // ---- ScVal readers (inverse of the builders above) ----
+  /** Read an ScVal `Address` back to its `G...`/`C...` string form. */
+  readAddress(value: xdr.ScVal): string {
+    return Address.fromScVal(value).toString();
+  }
+  /** Read an ScVal `i128` back to a bigint (stroops). */
+  readI128(value: xdr.ScVal): bigint {
+    return scValToNative(value) as bigint;
+  }
+
   /** Build → simulate/assemble → sign → send → poll to a final status. */
   private async submit(op: xdr.Operation): Promise<{
     result: rpc.Api.GetSuccessfulTransactionResponse;
@@ -181,8 +297,15 @@ export class SorobanService {
 
     const prepared = await this.server.prepareTransaction(tx);
     prepared.sign(platform);
+    return this.sendAndPoll(prepared);
+  }
 
-    const sent = await this.server.sendTransaction(prepared);
+  /** Send a signed tx and poll to a final status; throws unless SUCCESS. */
+  private async sendAndPoll(tx: Transaction | FeeBumpTransaction): Promise<{
+    result: rpc.Api.GetSuccessfulTransactionResponse;
+    txHash: string;
+  }> {
+    const sent = await this.server.sendTransaction(tx);
     if (sent.status === 'ERROR') {
       throw new Error(
         `sendTransaction rejected: ${JSON.stringify(sent.errorResult)}`,
