@@ -32,14 +32,19 @@ These consolidate and, where noted, **refine** ARCHITECTURE.md:
    `mint`/`transfer` are gated on-chain, an unregistered wallet calling `invest()`
    directly is **reverted** — the website is the only path onto the whitelist.
 
-4. **Ownership tracking — external indexer service, not a self-hosted worker.**
-   We consume a managed Soroban indexer (e.g. Mercury / SubQuery / equivalent). The
-   backend either **receives webhooks** or **queries** that service for share-token
-   `transfer`/`mint`/`burn` events and maintains `TokenHolding` from that feed.
+4. **Ownership tracking — self-hosted polling loop, no third-party indexer.**
+   A single `@Interval` job polls Soroban RPC's `getEvents` for each `LIVE` campaign's
+   `ShareToken` contract, using the events only to detect *which* addresses changed —
+   the balance actually written to `TokenHolding` is always a fresh on-chain
+   `balance()` read (source of truth, avoids amount-decoding bugs), not a value parsed
+   out of the event. The last processed ledger is a single cursor kept in Valkey via
+   `CacheService`, not a DB migration.
 
-   > Supersedes ARCHITECTURE.md "Event Indexer (worker)" / decision #9 mechanics:
-   > we do **not** run our own continuous `getEvents` ingestion worker. The
-   > `TokenHolding` model and its role are unchanged; only the data source changes.
+   > Reinstates (in simplified form) ARCHITECTURE.md's "Event Indexer (worker)" /
+   > decision #9 mechanics: for hackathon scope, a self-hosted poll beats onboarding a
+   > managed indexer (Mercury / SubQuery / Goldsky) — no external account/billing, and
+   > RPC's 7-day event retention is a non-issue for a service kept continuously running.
+   > The `TokenHolding` model and its role are unchanged.
 
 5. **Dividends — pull-based, Merkle-pinned (unchanged).** Backend snapshots
    `TokenHolding` at the deposit ledger, builds a Merkle tree, posts the root
@@ -181,25 +186,43 @@ whitelisted investor account with test USDC — same caveat as Phases 2–3.)_
 
 ---
 
-## Phase 5 — Ownership tracking via external indexer
+## Phase 5 — Ownership tracking via a self-hosted polling loop
 
-**Goal:** maintain `TokenHolding` (current balances) from a managed indexer, since
-SEP-41 is not enumerable on-chain — **without** running our own ingestion worker.
+**Goal:** maintain `TokenHolding` (current balances) by polling Soroban RPC directly,
+since SEP-41 is not enumerable on-chain — no third-party indexer, no webhooks.
 
 **Design notes**
-- Choose the provider (Mercury / SubQuery / equivalent) and the mode:
-  **webhook push** (preferred) and/or **API query/poll** as fallback.
-- Backend's job is reconciliation into `TokenHolding`, not raw ingestion.
+- One periodic job, not a BullMQ per-entity state machine like `campaign-deploy`/
+  `kyc-whitelist` — there's no per-entity retry semantics here, just a continuous
+  cursor-based loop, so a plain `@Interval` + `onApplicationBootstrap` service is enough
+  (no queue/processor).
+- `SorobanService` gains a `getEvents` wrapper (filtered by the `ShareToken`
+  `contractIds` of all `LIVE` campaigns) and a read-only `balance(address)` wrapper.
+- The cursor (last processed ledger) lives in Valkey via `CacheService`, not a new
+  table/column — no migration needed for this phase.
+- Events are used only to find *which* addresses changed on a given poll; the balance
+  written to `TokenHolding` always comes from a fresh on-chain `balance()` read, never
+  from decoding the event's amount — so a mis-decoded event can't corrupt the ledger.
+- RPC's `getEvents` retention is 7 days; a non-issue for a loop kept continuously
+  running — a restart just resumes from the last saved cursor (small lookback if the
+  cursor is missing).
 
 **Deliverables**
-- [ ] Select indexer provider + subscribe to `ShareToken` transfer/mint/burn events.
-- [ ] Webhook receiver endpoint (verify signature/secret; idempotent on event id).
-- [ ] Reconcile events → upsert `TokenHolding` by `(campaignId, holderAddress)`.
-- [ ] Backfill/query path for gaps or initial sync.
-- [ ] Tests for webhook handling + holding reconciliation.
+- [ ] `SorobanService.getEvents` — wraps `rpc.Server.getEvents({ startLedger, filters })`.
+- [ ] `SorobanService.balance` (or reuse `invokeContract`/`readI128`) — read-only
+      `balance(address)` call against a `ShareToken` contract.
+- [ ] `TokenHoldingIndexerService` (new, e.g. `src/indexer/`): `@Interval` poll loop +
+      `onApplicationBootstrap`; reads/writes the ledger cursor in `CacheService`; queries
+      `LIVE` campaigns for the set of `ShareToken` addresses to filter on.
+- [ ] Reconcile events → for each touched `(campaignId, holderAddress)`, `balance()` read
+      → upsert `TokenHolding` (unique on `campaignId, holderAddress`).
+- [ ] Backfill path for first run / gaps (e.g. seed the cursor from the earliest `LIVE`
+      campaign's wire ledger, or a configurable lookback).
+- [ ] Tests for the poll loop (event → balance → upsert), cursor persistence, and
+      resume-after-restart behavior.
 
-**Acceptance:** after on-chain transfers, `TokenHolding` matches on-chain balances
-for a campaign within the indexer's delivery latency.
+**Acceptance:** after an on-chain transfer/investment, `TokenHolding` matches the
+contract's real `balance()` for the affected addresses within one poll interval.
 
 **Depends on:** Phase 1 (token deployed), Phase 4 (real transfers to observe).
 
