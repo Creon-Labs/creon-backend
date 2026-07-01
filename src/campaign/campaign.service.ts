@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client';
 import {
   CampaignDeployStatus,
@@ -15,6 +15,19 @@ export interface ProposalForCampaign {
   requestedAmount: Prisma.Decimal;
   lockPeriodDays: number;
 }
+
+/** Fields exposed for public campaign browsing (list + detail). */
+const PUBLIC_CAMPAIGN_SELECT = {
+  id: true,
+  contractAddress: true,
+  goalAmount: true,
+  raisedAmount: true,
+  status: true,
+  lockEndAt: true,
+  startAt: true,
+  endAt: true,
+  projectToken: { select: { assetCode: true, contractAddress: true } },
+} satisfies Prisma.CampaignSelect;
 
 /**
  * Materializes the off-chain Campaign mirror (campaign + share-token + vault rows)
@@ -56,5 +69,26 @@ export class CampaignService {
       },
       select: { id: true },
     });
+  }
+
+  /** List campaigns whose contracts are live (open for browsing/investment). */
+  listActive() {
+    return this.prisma.campaign.findMany({
+      where: { deployStatus: CampaignDeployStatus.LIVE },
+      orderBy: { startAt: 'desc' },
+      select: PUBLIC_CAMPAIGN_SELECT,
+    });
+  }
+
+  /** Public detail for one campaign. */
+  async getPublic(id: string) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id },
+      select: PUBLIC_CAMPAIGN_SELECT,
+    });
+    if (!campaign) {
+      throw new NotFoundException('Campaign not found');
+    }
+    return campaign;
   }
 }

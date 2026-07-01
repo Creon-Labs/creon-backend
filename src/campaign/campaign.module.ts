@@ -5,6 +5,7 @@ import {
   CAMPAIGN_DEPLOY_QUEUE,
   CampaignDeployService,
 } from './campaign-deploy.service';
+import { CampaignController } from './campaign.controller';
 import { CampaignService } from './campaign.service';
 
 /**
@@ -15,6 +16,7 @@ import { CampaignService } from './campaign.service';
  */
 @Module({
   imports: [BullModule.registerQueue({ name: CAMPAIGN_DEPLOY_QUEUE })],
+  controllers: [CampaignController],
   providers: [CampaignService, CampaignDeployService, CampaignDeployProcessor],
   exports: [CampaignService, CampaignDeployService],
 })

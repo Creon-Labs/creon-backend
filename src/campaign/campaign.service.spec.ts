@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client';
 import {
   CampaignDeployStatus,
@@ -55,6 +56,46 @@ describe('CampaignService', () => {
     const expected = before + 30 * 86_400 * 1000;
     expect(arg.data.lockEndAt.getTime()).toBeGreaterThanOrEqual(
       expected - 5000,
+    );
+  });
+});
+
+describe('CampaignService public reads', () => {
+  function makeService() {
+    const prisma = {
+      campaign: {
+        findMany: jest.fn().mockResolvedValue([{ id: 'camp-1' }]),
+        findUnique: jest.fn(),
+      },
+    };
+    const service = new CampaignService(prisma as unknown as PrismaService);
+    return { service, prisma };
+  }
+
+  it('listActive returns only LIVE-deployed campaigns', async () => {
+    const { service, prisma } = makeService();
+    const result = await service.listActive();
+    expect(result).toEqual([{ id: 'camp-1' }]);
+    expect(prisma.campaign.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { deployStatus: CampaignDeployStatus.LIVE },
+      }) as unknown,
+    );
+  });
+
+  it('getPublic returns the campaign when found', async () => {
+    const { service, prisma } = makeService();
+    prisma.campaign.findUnique.mockResolvedValue({ id: 'camp-1' });
+    await expect(service.getPublic('camp-1')).resolves.toEqual({
+      id: 'camp-1',
+    });
+  });
+
+  it('getPublic 404s an unknown campaign', async () => {
+    const { service, prisma } = makeService();
+    prisma.campaign.findUnique.mockResolvedValue(null);
+    await expect(service.getPublic('nope')).rejects.toBeInstanceOf(
+      NotFoundException,
     );
   });
 });
