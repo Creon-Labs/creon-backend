@@ -241,19 +241,48 @@ real transfers to observe — same caveat as Phases 2–4.)_
 **Goal:** business deposits profit; investors claim pro-rata dividends, enforced
 on-chain via a Merkle root.
 
+**Design notes (refines the original sketch, decided during build)**
+- **Deposit is a relay, not indexer-observed.** The business deposits via a
+  prepare/submit-XDR flow that mirrors invest (`deposit_profit()` needs the
+  depositor's own auth), so a successful submit creates the `ProfitDistribution`
+  synchronously and pins `snapshotLedger` from the tx result — no dependency on the
+  indexer catching a `ProfitDeposited` event.
+- **Snapshot + root post is a BullMQ orchestrator** (`distribution` queue), the same
+  idempotent/resumable shape as `campaign-deploy`/`kyc-whitelist`. Resume points are
+  derived from persisted data (claims built? root posted?).
+- **Claims are recorded by the submit endpoint** (idempotent on the unique
+  `claim_tx_hash`); no indexer `claim`-event reconciliation for now.
+- **Unclaimed dividends stay claimable indefinitely** — the contract has no reclaim
+  path, so there is no claim window / return-to-business (documented, not built).
+- On-chain leaf/Merkle encoding is pinned to a Rust-emitted test vector
+  (`print_merkle_test_vector` in `contracts/campaign/src/test.rs`).
+
 **Deliverables**
-- [ ] On `deposit_profit` (observed via the indexer) → fix snapshot ledger; read
-      `TokenHolding` at that ledger.
-- [ ] Compute pro-rata entitlements; build Merkle tree + root; persist
-      `ProfitDistribution` + per-holder `DistributionClaim` (with `merkleProof`).
-- [ ] Post `set_distribution(id, merkle_root)` on-chain.
-- [ ] API: list entitlements, fetch proof, mark claimed (driven by indexer `claim` events).
-- [ ] Unclaimed-dividend policy (rollover vs return) + claim window.
-- [ ] Tests for snapshot math, tree/root, and claim status reconciliation.
+- [x] Entrepreneur `deposit_profit()` relay (`POST campaigns/:id/distributions/deposit`
+      prepare + submit) → creates `ProfitDistribution` (PENDING), pins snapshot ledger,
+      enqueues the orchestrator. New `ProfitDistribution.onchainId` (per-campaign `u32`),
+      `setDistributionTxHash`, `distributionError/Attempts`, `DistributionStatus.FAILED`.
+- [x] `DistributionOrchestratorService.drive`: snapshot registered `TokenHolding`
+      (balance > 0), compute integer-floor pro-rata entitlements, build the Merkle tree
+      + root (`src/distribution/merkle.util.ts`), persist per-holder `DistributionClaim`
+      (with `leafIndex` + `merkleProof`) in one transaction.
+- [x] Post `set_distribution(id, merkle_root)` on-chain (owner/platform-signed);
+      idempotent (skips if `setDistributionTxHash` set; tolerates `DistributionExists`).
+- [x] API: `GET distributions/mine` (entitlements + proofs), claim relay
+      (`POST distributions/:id/claim` prepare + submit) marks `DistributionClaim`
+      CLAIMED + bumps `totalClaimed`; `GET campaigns/:id/distributions`.
+- [x] Unclaimed-dividend policy: **claimable indefinitely** (no on-chain reclaim /
+      claim window — the contract has no reclaim function).
+- [x] Tests: leaf/tree/root vs the on-chain vector, snapshot math (floor, Σ ≤ total),
+      resume paths, `DistributionExists` tolerance, claim verify + idempotency
+      (`merkle.util.spec.ts`, `distribution-orchestrator.service.spec.ts`,
+      `distribution.service.spec.ts`).
 
 **Acceptance:** a deposited profit yields claimable entitlements; an investor's
 `claim(id, amount, proof)` succeeds and is marked `CLAIMED`; total claims are bounded
-by the deposited amount.
+by the deposited amount (the backend builds a tree whose leaf amounts sum to ≤ the
+deposit). _(Implemented + unit-tested; on-chain e2e pending a funded
+`STELLAR_PLATFORM_SECRET` + a whitelisted holder to observe — same caveat as Phases 2–5.)_
 
 **Depends on:** Phases 1–5.
 

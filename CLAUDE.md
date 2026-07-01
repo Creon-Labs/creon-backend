@@ -12,14 +12,17 @@ become on-chain campaigns that investors fund with USDC. Returns flow back as
 `docs/ARCHITECTURE.md` (decisions + roadmap) for the full domain model.
 
 Status: persistence, wallet-auth, KYC/admin-approval, entrepreneur proposals,
-**on-chain integration through campaign deploy**, investment recording, and the
-**ownership indexer** (rebuilds `TokenHolding`) are built. The Soroban contracts
+**on-chain integration through campaign deploy**, investment recording, the
+**ownership indexer** (rebuilds `TokenHolding`), and the **dividend distribution +
+claim flow** (Merkle snapshots) are built. The Soroban contracts
 (`contracts/`) are deployed to **testnet**; the backend deploys a per-campaign
 `ShareToken` + `Campaign` on proposal approval and syncs KYC approvals into the
-on-chain whitelist — both as idempotent BullMQ orchestrators. Still **not built**:
-the end-to-end dividend distribution/claim flow (Merkle snapshots). See
+on-chain whitelist — both as idempotent BullMQ orchestrators. Dividends: the business
+deposits profit (relay), a BullMQ orchestrator snapshots holdings → builds a Merkle
+tree → posts `set_distribution`, and investors `claim()` (relay). See
 `docs/ARCHITECTURE.md` (roadmap) and `docs/SMART_CONTRACT_PLAN.md` (phased plan) —
-Phases 1–5 are done; Phase 6 (dividends) remains.
+Phases 1–6 are done. Remaining work is on-chain e2e (needs a funded
+`STELLAR_PLATFORM_SECRET`) and post-hackathon hardening.
 
 ## Commands
 
@@ -156,9 +159,9 @@ ledger-sequence fields serialize to JSON.
   work. Deploys are **idempotent**: a deterministic per-`(campaign, kind)` salt plus
   an on-chain pre-check (`contractExists`) means a retry recovers the same address
   instead of duplicating.
-- **Two BullMQ orchestrators, one shared shape.** `campaign-deploy` and
-  `kyc-whitelist` each have: a `*Service` that is an idempotent, resumable state
-  machine (`drive()`), a thin `*Processor` (`WorkerHost`) that just calls `drive()`
+- **Three BullMQ orchestrators, one shared shape.** `campaign-deploy`,
+  `kyc-whitelist`, and `distribution` each have: a `*Service` that is an idempotent,
+  resumable state machine (`drive()`), a thin `*Processor` (`WorkerHost`) that just calls `drive()`
   (a throw fails the job → BullMQ retries with backoff), and a **reconcile loop**
   (`@Interval` every 5 min **and** `onApplicationBootstrap`) that re-enqueues any
   unfinished entity — recovering work whose queue job was lost (e.g. Valkey
@@ -174,6 +177,19 @@ ledger-sequence fields serialize to JSON.
   the KYC review status** — APPROVED → `registry.add(wallet)` → WHITELISTED, REVOKED
   → `registry.remove(wallet)` → REMOVED. On-chain add/remove are themselves
   idempotent, so a duplicate job can't corrupt state.
+- Distribution orchestrator (`src/distribution/`, `DistributionStatus`): the third
+  orchestrator. The business deposits profit via a prepare/submit **relay** (mirrors
+  invest — `deposit_profit()` needs the depositor's auth), which opens a
+  `ProfitDistribution` (PENDING) and enqueues `drive()`: snapshot registered
+  `TokenHolding` → integer-floor pro-rata entitlements → build a **commutative
+  SHA-256 Merkle tree** (`src/distribution/merkle.util.ts`) → persist one
+  `DistributionClaim` per holder → `set_distribution(onchainId, root)` on-chain →
+  COMPLETED. Investors then `claim()` via the same relay shape; the submit endpoint
+  marks the claim CLAIMED (idempotent on `claim_tx_hash`). **Leaf/tree encoding must
+  match the contract byte-for-byte** — it is pinned to a Rust-emitted vector
+  (`print_merkle_test_vector` in `contracts/campaign/src/test.rs`); the leaf `ScVal`
+  map is keyed `address` < `amount` < `index`. Unclaimed dividends stay claimable
+  indefinitely (the contract has no reclaim path).
 
 **Ownership indexer** (`src/indexer/`, `TokenHoldingIndexerService`) — the one
 non-BullMQ loop: a plain `@Interval` (+ `onApplicationBootstrap`) poll, since there's

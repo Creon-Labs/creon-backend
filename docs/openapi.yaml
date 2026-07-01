@@ -52,6 +52,20 @@ tags:
       3. `POST /campaigns/{campaignId}/investments` → backend verifies the signed
          tx, wraps it in a **platform fee-bump** (so the investor pays no XLM
          fee), submits it, and records the `Investment`.
+  - name: distributions
+    description: |
+      Dividend (bagi hasil) distribution + claim. The business deposits profit
+      (USDC) into the campaign, the backend snapshots share ownership and posts a
+      **Merkle root** on-chain, and investors claim their pro-rata entitlement —
+      the contract verifies each Merkle proof, so the backend cannot forge amounts.
+
+      Both `deposit_profit()` and `claim()` require the caller's own on-chain
+      authorization, so — like invest — they use a **prepare → sign → submit**
+      relay: the backend builds the unsigned XDR (caller as source), the caller's
+      wallet signs it, and the backend fee-bumps + submits it. Between deposit and
+      claim, a BullMQ orchestrator builds the tree and posts the root
+      (`set_distribution`); the distribution is claimable once it is `COMPLETED`.
+      Unclaimed dividends remain claimable indefinitely (no on-chain reclaim).
 
 components:
   securitySchemes:
@@ -103,6 +117,22 @@ components:
         - `PENDING` – recorded but not yet confirmed on-chain
         - `CONFIRMED` – the `invest()` tx succeeded on-chain and shares were minted
         - `FAILED` – the investment did not complete
+
+    DistributionStatus:
+      type: string
+      enum: [PENDING, COMPLETED, FAILED]
+      description: |
+        - `PENDING` – deposit recorded; snapshot + Merkle root not yet posted
+        - `COMPLETED` – tree built, claims persisted, and `set_distribution` posted on-chain (claimable)
+        - `FAILED` – the orchestrator errored (retried with backoff)
+
+    ClaimStatus:
+      type: string
+      enum: [PENDING, CLAIMED, FAILED]
+      description: |
+        - `PENDING` – entitlement computed; not yet claimed on-chain
+        - `CLAIMED` – the `claim()` tx succeeded and USDC was paid to the holder
+        - `FAILED` – the claim did not complete
 
     # ── Request bodies ─────────────────────────────────────────────────────────
     ChallengeRequest:
@@ -272,6 +302,27 @@ components:
           description: |
             Base64 XDR of the investor-signed `invest()` transaction envelope
             (the XDR returned by the `prepare` endpoint, signed by the wallet).
+          example: AAAAAgAAAAA...
+
+    DepositProfitRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: string
+          pattern: '^\d+(\.\d{1,7})?$'
+          description: USDC profit to deposit as a decimal string (up to 7 decimals, must be > 0)
+          example: "1000.0000000"
+
+    SubmitSignedTxRequest:
+      type: object
+      required: [signedXdr]
+      properties:
+        signedXdr:
+          type: string
+          description: |
+            Base64 XDR of the caller-signed transaction envelope — the `deposit_profit()`
+            or `claim()` XDR returned by the matching `prepare` endpoint, signed by the wallet.
           example: AAAAAgAAAAA...
 
     # ── Responses ──────────────────────────────────────────────────────────────
@@ -693,6 +744,135 @@ components:
           format: int64
           description: Stellar ledger sequence at which this balance was last synced
           example: 1234567
+
+    PrepareDepositResponse:
+      type: object
+      required: [campaignId, xdr]
+      properties:
+        campaignId:
+          type: string
+          format: uuid
+        xdr:
+          type: string
+          description: |
+            Base64 XDR of the unsigned, prepared `deposit_profit()` transaction
+            (business as source). Sign it with the wallet and post it back to the submit endpoint.
+          example: AAAAAgAAAAA...
+
+    PrepareClaimResponse:
+      type: object
+      required: [distributionId, xdr]
+      properties:
+        distributionId:
+          type: string
+          format: uuid
+        xdr:
+          type: string
+          description: |
+            Base64 XDR of the unsigned, prepared `claim()` transaction (investor as
+            source). Sign it with the wallet and post it back to the submit endpoint.
+          example: AAAAAgAAAAA...
+
+    ProfitDistribution:
+      type: object
+      required: [id, campaignId, onchainId, totalAmount, totalClaimed, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        campaignId:
+          type: string
+          format: uuid
+        onchainId:
+          type: integer
+          description: The contract's per-campaign distribution id (`u32`), used by `set_distribution`/`claim`.
+          example: 0
+        totalAmount:
+          type: string
+          description: Profit (USDC) deposited for this distribution, as a decimal string (7 decimals)
+          example: "1000.0000000"
+        totalShares:
+          type: [string, 'null']
+          description: Total snapshotted shares across eligible holders (null until snapshotted)
+          example: "1000.0000000"
+        rewardPerShare:
+          type: [string, 'null']
+          description: Dividend per share (`totalAmount / totalShares`), as a decimal string (null until snapshotted)
+          example: "1.000000000000000000"
+        totalClaimed:
+          type: string
+          description: USDC claimed so far, as a decimal string (7 decimals)
+          example: "600.0000000"
+        merkleRoot:
+          type: [string, 'null']
+          description: Hex-encoded Merkle root posted on-chain (null until the tree is built)
+        snapshotLedger:
+          type: [integer, 'null']
+          format: int64
+          description: Stellar ledger sequence the profit was deposited at
+          example: 1234567
+        status:
+          $ref: '#/components/schemas/DistributionStatus'
+        distributedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    DistributionClaim:
+      type: object
+      description: The caller's own entitlement for one distribution, including the Merkle proof.
+      required: [id, distributionId, shareAmount, amount, merkleProof, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        distributionId:
+          type: string
+          format: uuid
+        shareAmount:
+          type: string
+          description: The holder's snapshotted share balance, as a decimal string (7 decimals)
+          example: "600.0000000"
+        amount:
+          type: string
+          description: The holder's pro-rata USDC entitlement, as a decimal string (7 decimals)
+          example: "600.0000000"
+        leafIndex:
+          type: [integer, 'null']
+          description: The leaf index in the Merkle tree (also the on-chain `claim()` index)
+          example: 0
+        merkleProof:
+          type: array
+          items:
+            type: string
+          description: Hex-encoded sibling hashes proving the leaf against the posted root
+        claimTxHash:
+          type: [string, 'null']
+          minLength: 64
+          maxLength: 64
+          description: Hex-encoded Stellar transaction hash of the on-chain `claim()`
+        status:
+          $ref: '#/components/schemas/ClaimStatus'
+        claimedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        distribution:
+          type: object
+          description: Minimal parent-distribution context for the entitlement.
+          properties:
+            onchainId:
+              type: integer
+              example: 0
+            campaignId:
+              type: string
+              format: uuid
+            status:
+              $ref: '#/components/schemas/DistributionStatus'
 
     ErrorResponse:
       type: object
@@ -1670,3 +1850,266 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /campaigns/{campaignId}/distributions/deposit/prepare:
+    post:
+      tags: [distributions]
+      summary: Prepare a deposit_profit() transaction
+      description: |
+        Builds and simulates a `deposit_profit()` transaction **sourced at the
+        business's wallet** and returns the unsigned XDR for the wallet to sign.
+        Requires the `ENTREPRENEUR` role, an `APPROVED` KYC profile, and **ownership**
+        of the campaign (otherwise **403**); the campaign must be live (otherwise
+        **409**). No `ProfitDistribution` row is created at this step.
+      operationId: distributionDepositPrepare
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the campaign to deposit profit into
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DepositProfitRequest'
+      responses:
+        '200':
+          description: Unsigned prepared transaction XDR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrepareDepositResponse'
+        '400':
+          description: Validation error (e.g. amount ≤ 0)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Campaign is not live
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /campaigns/{campaignId}/distributions/deposit:
+    post:
+      tags: [distributions]
+      summary: Submit a signed deposit_profit() transaction
+      description: |
+        Verifies the business-signed transaction really is this campaign's
+        `deposit_profit()`, wraps it in a **platform fee-bump**, submits it on-chain,
+        and — on success — opens a `ProfitDistribution` (`PENDING`) and enqueues the
+        orchestrator that snapshots holdings, builds the Merkle tree, and posts the
+        root. Idempotent on the transaction hash. Requires the `ENTREPRENEUR` role,
+        an `APPROVED` KYC profile, and ownership of the campaign.
+      operationId: distributionDepositSubmit
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the campaign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitSignedTxRequest'
+      responses:
+        '201':
+          description: Distribution opened (PENDING; orchestrator enqueued)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfitDistribution'
+        '400':
+          description: |
+            Malformed XDR, or the tx does not match the expected `deposit_profit()`
+            for this campaign/business (wrong contract, function, depositor, or amount).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Campaign is not live
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /campaigns/{campaignId}/distributions:
+    get:
+      tags: [distributions]
+      summary: List a campaign's distributions
+      description: |
+        Returns a campaign's profit distributions, newest first. An unknown campaign
+        id returns **404**.
+      operationId: distributionListForCampaign
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the campaign
+      responses:
+        '200':
+          description: The campaign's distributions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProfitDistribution'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /distributions/mine:
+    get:
+      tags: [distributions]
+      summary: List own dividend entitlements
+      description: |
+        Returns the authenticated investor's own `DistributionClaim` entitlements
+        (with Merkle proofs), newest first. Requires the `INVESTOR` role.
+      operationId: distributionListMine
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The caller's entitlements
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DistributionClaim'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /distributions/{distributionId}/claim/prepare:
+    post:
+      tags: [distributions]
+      summary: Prepare a claim() transaction
+      description: |
+        Builds and simulates a `claim()` transaction **sourced at the investor's
+        wallet** — filling in the on-chain distribution id, leaf index, amount, and
+        Merkle proof from the caller's entitlement — and returns the unsigned XDR to
+        sign. Requires the `INVESTOR` role and an `APPROVED` KYC profile. **404** if
+        the caller has no entitlement; **409** if the distribution is not yet
+        `COMPLETED` or the entitlement is already claimed.
+      operationId: distributionClaimPrepare
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: distributionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the distribution to claim from
+      responses:
+        '200':
+          description: Unsigned prepared transaction XDR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrepareClaimResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Distribution not ready, or entitlement already claimed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /distributions/{distributionId}/claim:
+    post:
+      tags: [distributions]
+      summary: Submit a signed claim() transaction
+      description: |
+        Verifies the investor-signed transaction really is this investor's `claim()`
+        for this entitlement (matching contract, distribution id, leaf index,
+        claimant, and amount), wraps it in a **platform fee-bump**, submits it, and —
+        on success — marks the `DistributionClaim` `CLAIMED` and bumps the
+        distribution's `totalClaimed`. Idempotent on the transaction hash. Requires
+        the `INVESTOR` role and an `APPROVED` KYC profile.
+      operationId: distributionClaimSubmit
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: distributionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the distribution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitSignedTxRequest'
+      responses:
+        '201':
+          description: Claim recorded (CLAIMED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DistributionClaim'
+        '400':
+          description: |
+            Malformed XDR, or the tx does not match the expected `claim()` for this
+            entitlement (wrong contract, function, id, index, claimant, or amount).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Distribution not ready, or entitlement already claimed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
