@@ -285,6 +285,18 @@ export class SorobanService {
   u64Arg(value: bigint): xdr.ScVal {
     return nativeToScVal(value, { type: 'u64' });
   }
+  /** Soroban `u32` (a distribution id / Merkle leaf index). */
+  u32Arg(value: number): xdr.ScVal {
+    return xdr.ScVal.scvU32(value);
+  }
+  /** Soroban `BytesN<32>`/`Bytes` — e.g. a Merkle root or proof sibling hash. */
+  bytesArg(value: Buffer): xdr.ScVal {
+    return xdr.ScVal.scvBytes(value);
+  }
+  /** Soroban `Vec<BytesN<32>>` — a Merkle proof (list of sibling hashes). */
+  bytesVecArg(values: Buffer[]): xdr.ScVal {
+    return xdr.ScVal.scvVec(values.map((v) => xdr.ScVal.scvBytes(v)));
+  }
 
   // ---- ScVal readers (inverse of the builders above) ----
   /** Read an ScVal `Address` back to its `G...`/`C...` string form. */
@@ -294,6 +306,10 @@ export class SorobanService {
   /** Read an ScVal `i128` back to a bigint (stroops). */
   readI128(value: xdr.ScVal): bigint {
     return scValToNative(value) as bigint;
+  }
+  /** Read an ScVal `u32` back to a number (a distribution id / leaf index). */
+  readU32(value: xdr.ScVal): number {
+    return scValToNative(value) as number;
   }
 
   // ---- read-only (simulation) helpers — used by the ownership indexer ----
