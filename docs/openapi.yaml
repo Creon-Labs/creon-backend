@@ -31,6 +31,12 @@ tags:
     description: Entrepreneur funding proposals (off-chain draft → submit)
   - name: campaigns
     description: Public browsing of live campaigns (list + detail)
+  - name: holdings
+    description: |
+      Current share-token ownership, maintained off-chain by the ownership indexer
+      (polls `ShareToken` events, then writes a fresh on-chain `balance()` read into
+      `TokenHolding`). Two views: an investor's own portfolio, and a campaign's
+      public — but identity-masked — cap table.
   - name: investments
     description: |
       Investor funding of a live campaign in USDC.
@@ -628,6 +634,65 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    Holding:
+      type: object
+      description: One of the caller's own current share holdings (own data, unmasked).
+      required: [campaignId, balance, updatedLedger]
+      properties:
+        campaignId:
+          type: string
+          format: uuid
+        balance:
+          type: string
+          description: Current share balance as a decimal string (7 decimals)
+          example: "500.0000000"
+        updatedLedger:
+          type: integer
+          format: int64
+          description: Stellar ledger sequence at which this balance was last synced
+          example: 1234567
+        campaign:
+          type: object
+          description: Minimal campaign context for the portfolio row.
+          properties:
+            status:
+              $ref: '#/components/schemas/CampaignStatus'
+            projectToken:
+              type: [object, 'null']
+              properties:
+                assetCode:
+                  type: string
+                  maxLength: 12
+                  example: WARUNGBU1234
+
+    CampaignHolding:
+      type: object
+      description: |
+        One row of a campaign's public cap table. Holder identity is **masked**: the
+        wallet address is truncated and any display name is reduced to initials. Legal
+        KYC names are never exposed here.
+      required: [holder, address, balance, updatedLedger]
+      properties:
+        holder:
+          type: [string, 'null']
+          description: |
+            The holder's masked display name (e.g. `B*** S***`), or `null` for an
+            unregistered on-chain address / a holder with no display name.
+          example: B*** S***
+        address:
+          type: string
+          description: Masked wallet address — first 4 and last 4 characters (e.g. `GCUQ…OCBY`)
+          example: GCUQ…OCBY
+        balance:
+          type: string
+          description: Current share balance as a decimal string (7 decimals)
+          example: "500.0000000"
+        updatedLedger:
+          type: integer
+          format: int64
+          description: Stellar ledger sequence at which this balance was last synced
+          example: 1234567
 
     ErrorResponse:
       type: object
@@ -1416,6 +1481,37 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /campaigns/{id}/holdings:
+    get:
+      tags: [holdings]
+      summary: Get a campaign's cap table
+      description: |
+        Public, unauthenticated. Returns the campaign's current share holders
+        (`balance > 0`), heaviest first. Holder identity is **masked** — truncated
+        wallet address + initials-only display name; legal KYC names are never
+        exposed. An unknown campaign id returns **404**.
+      operationId: campaignHoldings
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the campaign
+      responses:
+        '200':
+          description: The campaign's masked cap table
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CampaignHolding'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /campaigns/{campaignId}/investments/prepare:
     post:
       tags: [investments]
@@ -1545,6 +1641,31 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Investment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /holdings/mine:
+    get:
+      tags: [holdings]
+      summary: List own share holdings
+      description: |
+        Returns the authenticated investor's own current share holdings
+        (`balance > 0`) across all campaigns, largest first. Own data — not masked.
+        Requires the `INVESTOR` role.
+      operationId: holdingListMine
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The caller's current holdings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Holding'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
