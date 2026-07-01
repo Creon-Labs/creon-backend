@@ -13,6 +13,7 @@ import { AdminModule } from './admin/admin.module';
 import { ProposalModule } from './proposal/proposal.module';
 import { SorobanModule } from './soroban/soroban.module';
 import { CampaignModule } from './campaign/campaign.module';
+import { InvestmentModule } from './investment/investment.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { CampaignModule } from './campaign/campaign.module';
     AdminModule,
     ProposalModule,
     CampaignModule,
+    InvestmentModule,
   ],
   controllers: [AppController],
   providers: [AppService],

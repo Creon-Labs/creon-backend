@@ -15,6 +15,11 @@ export function toStroops(amount: Prisma.Decimal | string | number): bigint {
   return BigInt(new Prisma.Decimal(amount).times(STROOPS).toFixed(0));
 }
 
+/** Convert an on-chain `i128` stroop value back to a money `Decimal` (7 dp). */
+export function fromStroops(stroops: bigint): Prisma.Decimal {
+  return new Prisma.Decimal(stroops.toString()).div(STROOPS);
+}
+
 /**
  * Derive a ≤12-char SEP-41 asset code (the ShareToken symbol) from the business
  * name, with a short hash suffix so similarly-named businesses don't collide.
