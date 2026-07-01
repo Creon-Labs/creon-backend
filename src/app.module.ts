@@ -15,6 +15,7 @@ import { SorobanModule } from './soroban/soroban.module';
 import { CampaignModule } from './campaign/campaign.module';
 import { InvestmentModule } from './investment/investment.module';
 import { IndexerModule } from './indexer/indexer.module';
+import { HoldingModule } from './holding/holding.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { IndexerModule } from './indexer/indexer.module';
     CampaignModule,
     InvestmentModule,
     IndexerModule,
+    HoldingModule,
   ],
   controllers: [AppController],
   providers: [AppService],
