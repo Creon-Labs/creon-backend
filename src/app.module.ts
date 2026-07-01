@@ -16,6 +16,7 @@ import { CampaignModule } from './campaign/campaign.module';
 import { InvestmentModule } from './investment/investment.module';
 import { IndexerModule } from './indexer/indexer.module';
 import { HoldingModule } from './holding/holding.module';
+import { DistributionModule } from './distribution/distribution.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { HoldingModule } from './holding/holding.module';
     InvestmentModule,
     IndexerModule,
     HoldingModule,
+    DistributionModule,
   ],
   controllers: [AppController],
   providers: [AppService],
