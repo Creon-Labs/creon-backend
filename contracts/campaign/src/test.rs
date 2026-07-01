@@ -1,5 +1,7 @@
 #![cfg(test)]
 
+extern crate std;
+
 use super::*;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
@@ -201,4 +203,33 @@ fn claim_before_distribution_set_reverts() {
         .campaign
         .try_claim(&7u32, &0u32, &alice, &1i128, &proof)
         .is_err());
+}
+
+/// Prints a reproducible test vector (fixed addresses) so the Phase-6 TypeScript
+/// Merkle builder can assert byte-identical leaf hashes + root. Run with
+/// `cargo test -p campaign print_merkle_test_vector -- --nocapture`.
+#[test]
+fn print_merkle_test_vector() {
+    let e = Env::default();
+    let alice = Address::from_string(&String::from_str(
+        &e,
+        "GCHPJMNH7WWIHX7CY5CKWR3I35A5DK4X6IU7CJSFUDHTBEWWMI6VEHFJ",
+    ));
+    let bob = Address::from_string(&String::from_str(
+        &e,
+        "GCUQRLMIYPTNGYQBEN6P6HMTDAETLKYEQORMQWV7SKNTX7XDDNN3OCBY",
+    ));
+    let ha = leaf_hash(&e, 0, &alice, 600);
+    let hb = leaf_hash(&e, 1, &bob, 400);
+    let root = crate::merkle::hash_pair(&e, &ha, &hb);
+
+    let to_hex = |b: &BytesN<32>| -> std::string::String {
+        b.to_array()
+            .iter()
+            .map(|x| std::format!("{:02x}", x))
+            .collect()
+    };
+    std::println!("MERKLE_VECTOR LEAF_A(idx0,600)={}", to_hex(&ha));
+    std::println!("MERKLE_VECTOR LEAF_B(idx1,400)={}", to_hex(&hb));
+    std::println!("MERKLE_VECTOR ROOT={}", to_hex(&root));
 }
