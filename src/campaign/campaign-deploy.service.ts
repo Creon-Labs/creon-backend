@@ -97,9 +97,6 @@ export class CampaignDeployService implements OnApplicationBootstrap {
     await this.queue.remove(campaignId).catch(() => undefined);
     await this.queue.add('deploy', { campaignId } satisfies CampaignDeployJob, {
       jobId: campaignId,
-      attempts: 5,
-      backoff: { type: 'exponential', delay: 5000 },
-      removeOnComplete: true,
     });
   }
 

@@ -30,6 +30,13 @@ import { CampaignModule } from './campaign/campaign.module';
           // Required by BullMQ for its blocking worker connections.
           maxRetriesPerRequest: null,
         },
+        // Shared retry/backoff policy for every queue; a producer may still
+        // override per `.add()`.
+        defaultJobOptions: {
+          attempts: 5,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: true,
+        },
       }),
     }),
     PrismaModule,

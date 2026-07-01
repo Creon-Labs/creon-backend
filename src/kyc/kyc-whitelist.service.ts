@@ -92,9 +92,6 @@ export class KycWhitelistService implements OnApplicationBootstrap {
     await this.queue.remove(userId).catch(() => undefined);
     await this.queue.add('sync', { userId } satisfies KycWhitelistJob, {
       jobId: userId,
-      attempts: 5,
-      backoff: { type: 'exponential', delay: 5000 },
-      removeOnComplete: true,
     });
   }
 
