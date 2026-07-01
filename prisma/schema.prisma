@@ -83,9 +83,14 @@ enum InvestmentStatus {
   FAILED
 }
 
+// Distribution orchestrator state (snapshot -> Merkle tree -> set_distribution).
+// Idempotent + resumable like the deploy/whitelist state machines; resume points
+// are derived from persisted data (claims built? root posted?), so PENDING ->
+// COMPLETED (FAILED on error) is enough.
 enum DistributionStatus {
   PENDING
   COMPLETED
+  FAILED
 }
 
 enum ClaimStatus {
@@ -292,14 +297,19 @@ model TokenHolding {
 model ProfitDistribution {
   id             String             @id @default(uuid()) @db.Uuid
   campaignId     String             @map("campaign_id") @db.Uuid
+  onchainId      Int                @map("onchain_id") // contract distribution id (u32), per-campaign 0,1,2,…
   totalAmount    Decimal            @map("total_amount") @db.Decimal(28, 7)
-  totalShares    Decimal            @map("total_shares") @db.Decimal(28, 7)
-  rewardPerShare Decimal            @map("reward_per_share") @db.Decimal(38, 18)
+  totalShares    Decimal?           @map("total_shares") @db.Decimal(28, 7) // null until the orchestrator snapshots holdings
+  rewardPerShare Decimal?           @map("reward_per_share") @db.Decimal(38, 18) // null until snapshotted
   totalClaimed   Decimal            @default(0) @map("total_claimed") @db.Decimal(28, 7)
   merkleRoot     String?            @map("merkle_root") @db.VarChar(66)
   snapshotLedger BigInt?            @map("snapshot_ledger")
   depositTxHash  String?            @unique @map("deposit_tx_hash") @db.VarChar(64)
-  status         DistributionStatus @default(PENDING)
+  // On-chain set_distribution(id, root) tx; unique = idempotent root post.
+  setDistributionTxHash String?     @unique @map("set_distribution_tx_hash") @db.VarChar(64)
+  status               DistributionStatus @default(PENDING)
+  distributionError    String?      @map("distribution_error") @db.Text
+  distributionAttempts Int          @default(0) @map("distribution_attempts")
   distributedAt  DateTime           @default(now()) @map("distributed_at") @db.Timestamptz
   createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz
@@ -307,6 +317,7 @@ model ProfitDistribution {
   campaign Campaign            @relation(fields: [campaignId], references: [id])
   claims   DistributionClaim[]
 
+  @@unique([campaignId, onchainId])
   @@index([campaignId])
   @@map("profit_distributions")
 }
