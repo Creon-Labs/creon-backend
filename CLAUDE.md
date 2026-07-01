@@ -11,9 +11,14 @@ become on-chain campaigns that investors fund with USDC. Returns flow back as
 **dividends (bagi hasil)**, not buyback. See `docs/PROJECT.md` (narrative) and
 `docs/ARCHITECTURE.md` (decisions + roadmap) for the full domain model.
 
-Status: persistence + wallet-auth + KYC/admin-approval are built. On-chain
-integration (Soroban contracts, the event indexer, dividend distribution) is **not
-yet built** — `docs/ARCHITECTURE.md` is the roadmap.
+Status: persistence, wallet-auth, KYC/admin-approval, entrepreneur proposals, and
+**on-chain integration through campaign deploy** are built. The Soroban contracts
+(`contracts/`) are deployed to **testnet**; the backend deploys a per-campaign
+`ShareToken` + `Campaign` on proposal approval and syncs KYC approvals into the
+on-chain whitelist — both as idempotent BullMQ orchestrators. Still **not built**:
+the event indexer (which rebuilds `TokenHolding`), investment recording, and the
+end-to-end dividend distribution/claim flow. See `docs/ARCHITECTURE.md` (roadmap)
+and `docs/SMART_CONTRACT_PLAN.md` (phased plan) — Phases 1–2 are done.
 
 ## Commands
 
@@ -40,6 +45,14 @@ pnpm format                          # prettier --write
 pnpm prisma:studio                   # browse the DB
 ```
 
+The Soroban contracts in `contracts/` are a **standalone Cargo workspace**, kept out
+of the pnpm/Nest build (no npm scripts touch them). Work on them from `contracts/`:
+
+```bash
+cargo test              # unit + integration tests (host target)
+stellar contract build  # -> target/wasm32v1-none/release/*.wasm
+```
+
 ## Critical gotchas (read before building or running)
 
 - **`generated/` is gitignored.** The Prisma client is generated to
@@ -55,10 +68,13 @@ pnpm prisma:studio                   # browse the DB
 - **The generated client uses `.js` extension imports.** Jest resolves them via
   `moduleNameMapper: {"^(\\.{1,2}/.*)\\.js$": "$1"}` (in `package.json#jest`).
   Keep that mapping if you touch the jest config.
-- **Stellar signature verification uses `@stellar/stellar-base`, NOT the full
-  `@stellar/stellar-sdk`.** The full SDK pulls ESM-only deps that break ts-jest.
-  Jest's `transformIgnorePatterns` allowlists `@noble|@scure|@stellar|@stablelib`
-  so they get transformed — preserve it when adding Stellar code.
+- **Two Stellar packages, used deliberately.** Wallet-auth **signature
+  verification** uses the lean `@stellar/stellar-base` (`src/auth/`). The **Soroban
+  RPC + transaction-building** surface (`src/soroban/`) needs the full
+  `@stellar/stellar-sdk` (`rpc.Server`, `Operation`, `xdr`, …). Both pull ESM-only
+  deps that break ts-jest, so Jest's `transformIgnorePatterns` allowlists
+  `@noble|@scure|@stellar|@stablelib|uint8array-extras` for transform — preserve
+  that list when adding Stellar/Soroban code.
 - **Seed runs through `tsx`** (`prisma.config.ts` → `tsx prisma/seed.ts`) to avoid
   nodenext/ts-node ESM friction.
 - **pnpm blocks build scripts by default.** Prisma engines / esbuild are allowlisted
@@ -71,8 +87,11 @@ pnpm prisma:studio                   # browse the DB
 ## Architecture
 
 NestJS module-per-domain. `app.module.ts` wires: `ConfigModule` (global),
-`PrismaModule` (global), `StorageModule`, `CacheModule` (global), `AuthModule`,
-`KycModule`, `AdminModule`. `main.ts` installs a global `ValidationPipe`
+`ScheduleModule` (for the reconcile loops), `BullModule.forRootAsync` (the shared
+Valkey/BullMQ connection + `defaultJobOptions`: 5 attempts, exponential 5 s backoff,
+`removeOnComplete`), then `PrismaModule` (global), `StorageModule`, `CacheModule`
+(global), `SorobanModule`, `AuthModule`, `KycModule`, `AdminModule`,
+`ProposalModule`, `CampaignModule`. `main.ts` installs a global `ValidationPipe`
 (`whitelist + transform`) and a `BigInt.prototype.toJSON` patch so Prisma
 ledger-sequence fields serialize to JSON.
 
@@ -95,7 +114,7 @@ ledger-sequence fields serialize to JSON.
 - Guards (manual, **no passport**): `JwtAuthGuard` (verifies bearer token, attaches
   `request.user`), `RolesGuard` (reads `@Roles(...)` via `Reflector`),
   `ApprovedEntrepreneurGuard` (role ENTREPRENEUR **and** `KycProfile.status
-  === APPROVED`; built + tested but **not yet wired** — no proposal route exists).
+  === APPROVED`; now wired on the `/proposals` write routes — create/update/submit).
 - Decorators: `@Roles(...)`, `@CurrentUser()`. `AuthModule` re-exports `JwtModule`
   so importing modules get `JwtService` for the guards.
 
@@ -110,9 +129,59 @@ ledger-sequence fields serialize to JSON.
   → status PENDING. `nationalId` (NIK) is `@unique` (anti-Sybil) → P2002 returns 409.
 - `GET /kyc/me` returns the caller's status.
 - `admin/kyc` (admin): `GET ?status=` (returns presigned image URLs + each
-  submitter's `roles`), `POST :userId/approve`, `POST :userId/reject {reason}`.
+  submitter's `roles`), `POST :userId/approve`, `POST :userId/reject {reason}`,
+  `POST :userId/revoke {reason}` (APPROVED → REVOKED). Approve and revoke each
+  **enqueue an on-chain whitelist sync** (see orchestration below).
 
-**Data model** (`prisma/schema.prisma`): 11 models + 9 enums. DB columns are
+**Proposals + admin review** (`src/proposal/`, `src/admin/admin-proposal.*`):
+- `/proposals` (ENTREPRENEUR, approved KYC): `POST` create as DRAFT, `GET` list own,
+  `GET :id` one own, `PATCH :id` edit while DRAFT, `POST :id/submit` (DRAFT →
+  SUBMITTED). Reads are owner-scoped, so another user's proposal 404s. Off-chain
+  only — no Campaign row, no deploy yet.
+- `admin/proposals` (admin): `GET ?status=`, `POST :id/approve`, `POST :id/reject
+  {reason}`. **Approval is the deploy trigger**: in one transaction it writes a
+  `ProposalReview`, flips the proposal APPROVED, and materializes the Campaign mirror
+  (`CampaignService.createForProposal` → `Campaign` + `ProjectToken` + `CampaignVault`
+  rows, `PENDING_DEPLOYMENT` / deploy `PENDING`); after commit it enqueues the async
+  deploy. Never deploys inside the HTTP request.
+
+**On-chain integration** (`src/soroban/`, `src/campaign/`, `src/kyc/kyc-whitelist.*`):
+- `SorobanService` — thin wrapper over `@stellar/stellar-sdk`'s Soroban RPC +
+  tx-building surface, same env-configured `@Injectable` pattern as the other infra
+  wrappers. Every platform tx (deploys, `set_minter`, `registry.add/remove`) is
+  signed by the single `STELLAR_PLATFORM_SECRET` key, which is the `owner` of every
+  contract; the keypair is built **lazily** so the app boots without it for non-chain
+  work. Deploys are **idempotent**: a deterministic per-`(campaign, kind)` salt plus
+  an on-chain pre-check (`contractExists`) means a retry recovers the same address
+  instead of duplicating.
+- **Two BullMQ orchestrators, one shared shape.** `campaign-deploy` and
+  `kyc-whitelist` each have: a `*Service` that is an idempotent, resumable state
+  machine (`drive()`), a thin `*Processor` (`WorkerHost`) that just calls `drive()`
+  (a throw fails the job → BullMQ retries with backoff), and a **reconcile loop**
+  (`@Interval` every 5 min **and** `onApplicationBootstrap`) that re-enqueues any
+  unfinished entity — recovering work whose queue job was lost (e.g. Valkey
+  restarted) without an app restart. `enqueue` uses `jobId = <entityId>` and clears
+  any stale job first, so adds dedupe but a re-enqueue always re-attempts. Crucially,
+  each step's resume point is derived from **what is already persisted** (e.g. token
+  address → campaign address → wire tx), not from the status column alone.
+- Campaign deploy state machine (`CampaignDeployStatus`): `PENDING →
+  DEPLOYING_TOKEN → DEPLOYING_CAMPAIGN → WIRING → LIVE` (`FAILED` on error). Steps:
+  deploy the `ShareToken`, deploy the `Campaign` contract, `token.set_minter(campaign)`,
+  then flip the campaign `LIVE`/`ACTIVE` and the vault `FUNDING`.
+- KYC whitelist sync (`WhitelistStatus`): desired on-chain state is **derived from
+  the KYC review status** — APPROVED → `registry.add(wallet)` → WHITELISTED, REVOKED
+  → `registry.remove(wallet)` → REMOVED. On-chain add/remove are themselves
+  idempotent, so a duplicate job can't corrupt state.
+
+**Soroban contracts** (`contracts/`, standalone Cargo workspace) — deployed to
+testnet; addresses + WASM hashes live in `contracts/deployments/testnet.json` and
+are wired into the backend via `COMPLIANCE_REGISTRY_ADDRESS`, `SHARE_TOKEN_WASM_HASH`,
+`CAMPAIGN_WASM_HASH`, `USDC_CONTRACT_ADDRESS`, `STELLAR_*` (see `.env.example`).
+Three crates: `compliance-registry` (owner-gated KYC whitelist singleton),
+`share-token` (per-campaign restricted SEP-41), `campaign` (merged vault + lifecycle
++ Merkle-proof dividend distribution). See `contracts/README.md`.
+
+**Data model** (`prisma/schema.prisma`): 11 models + 11 enums. DB columns are
 snake_case via `@map`; timestamps are `@db.Timestamptz`. The DB is an **off-chain
 mirror** of on-chain state — it stores contract addresses + tx hashes, with
 `tx_hash` unique for idempotent reconciliation. Money is `Decimal(28,7)` (Stellar's

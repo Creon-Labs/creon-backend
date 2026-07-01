@@ -10,15 +10,23 @@
 > distribution folded into `Campaign` — see #7), and ownership tracking uses an
 > **external indexer service** rather than a self-hosted worker (see #9).
 >
-> Last updated: 2026-06-29.
+> Last updated: 2026-07-01.
 
 ## Status at a glance
 
-- ✅ **Persistence foundation implemented** — Prisma + PostgreSQL schema
-  (10 models + 8 enums), initial migration, global `PrismaModule`, docker-compose
-  Postgres, seed. See `prisma/schema.prisma` and `src/prisma/`.
-- ⏳ Everything on-chain (Soroban contracts, indexer, dividend distribution),
-  auth, and the API surface is **not yet built** — see the [roadmap](#build-roadmap).
+- ✅ **Persistence foundation** — Prisma 7 + PostgreSQL schema (11 models + 11
+  enums), migrations, global `PrismaModule`, docker-compose Postgres + Valkey +
+  MinIO, seed. See `prisma/schema.prisma` and `src/prisma/`.
+- ✅ **Wallet auth + KYC / admin approval + proposals** — challenge/signature JWT
+  auth, role-agnostic KYC, admin review, entrepreneur proposal lifecycle. See
+  `src/auth/`, `src/kyc/`, `src/admin/`, `src/proposal/`.
+- ✅ **On-chain integration through campaign deploy** — Soroban contracts live on
+  testnet (`contracts/`); on proposal approval the backend deploys a per-campaign
+  token + campaign and syncs the KYC whitelist — both idempotent BullMQ
+  orchestrators (`src/soroban/`, `src/campaign/`, `src/kyc/kyc-whitelist.*`).
+- ⏳ **Not yet built** — the ownership indexer feed (`TokenHolding`), investment
+  recording, and the dividend snapshot / Merkle distribution service. See the
+  [roadmap](#build-roadmap).
 
 ---
 
@@ -27,19 +35,19 @@
 | # | Decision | Why | Status |
 |---|----------|-----|--------|
 | 1 | **Prisma + PostgreSQL** as ORM/DB | Type-safe, fast migrations; Postgres fits financial data | ✅ Implemented |
-| 2 | **Wallet-based identity** (Stellar public key); email optional | Web3 product — wallet is the natural identity | ⏳ Auth flow not built |
-| 3 | **Share = restricted SEP-41 token** (permissioned). Holding is gated by a whitelist: **both `mint` (invest) and `transfer` require the recipient to be whitelisted**; non-transferable during lock, whitelist-only transfers after unlock | Programmable lock/transfer rules (classic assets only allow coarse auth flags); gating at mint **and** transfer is the only way KYC can't be bypassed by P2P-sending shares to an unregistered wallet; reuses a token standard instead of a hand-rolled percentage ledger | ⏳ Contract not built |
+| 2 | **Wallet-based identity** (Stellar public key); email optional | Web3 product — wallet is the natural identity | ✅ Implemented (challenge/signature JWT auth, `src/auth/`) |
+| 3 | **Share = restricted SEP-41 token** (permissioned). Holding is gated by a whitelist: **both `mint` (invest) and `transfer` require the recipient to be whitelisted**; non-transferable during lock, whitelist-only transfers after unlock | Programmable lock/transfer rules (classic assets only allow coarse auth flags); gating at mint **and** transfer is the only way KYC can't be bypassed by P2P-sending shares to an unregistered wallet; reuses a token standard instead of a hand-rolled percentage ledger | ✅ `ShareToken` built (Phase 1, testnet) |
 | 4 | **Returns via dividends / bagi hasil** (NOT buyback) | Transparent & easy to value for retail UMKM investors; value is conserved (can't both pay cash and inflate price from the same profit) | ✅ Schema supports it |
 | 5 | **Pull-based distribution** (investors `claim()`, not push) | Pushing payouts in a loop is gas-heavy and a DoS risk; pull scales and is safe | ✅ Schema supports it |
-| 6 | **Entitlement via Merkle snapshot** (NOT an accumulator/transfer-hook token) | After unlock holders change, so ownership must be pinned to a moment. Backend snapshots balances off-chain, posts a **merkle root** on-chain; claims verify against it → trust-minimized, and the token stays standard SEP-41 | ⏳ Service not built |
-| 7 | **Custody via Vault/Escrow** (NOT an AMM pool); vault + distribution **folded into the `Campaign` contract** | An AMM is redundant in a dividend model and contradicts crowdfunding — exit liquidity would require parking the very USDC that must go to the business. Merging cuts per-campaign deploys from 4 to 2 instances (see SMART_CONTRACT_PLAN.md #1) | ✅ `CampaignVault` model; ⏳ contract |
+| 6 | **Entitlement via Merkle snapshot** (NOT an accumulator/transfer-hook token) | After unlock holders change, so ownership must be pinned to a moment. Backend snapshots balances off-chain, posts a **merkle root** on-chain; claims verify against it → trust-minimized, and the token stays standard SEP-41 | 🟡 On-chain `claim` proof-verification built (Phase 1); backend snapshot service ⏳ |
+| 7 | **Custody via Vault/Escrow** (NOT an AMM pool); vault + distribution **folded into the `Campaign` contract** | An AMM is redundant in a dividend model and contradicts crowdfunding — exit liquidity would require parking the very USDC that must go to the business. Merging cuts per-campaign deploys from 4 to 2 instances (see SMART_CONTRACT_PLAN.md #1) | ✅ `CampaignVault` model + merged `Campaign` contract built (Phase 1, testnet) |
 | 8 | **Lifecycle Model A** — periodic dividends allowed **during** the lock | Lock secures the *principal* + token *transferability*, not profit-sharing; business can share profit while capital stays locked | ✅ Schema supports it |
 | 9 | **Ownership tracked in `TokenHolding`** (fed by an **external indexer service** — webhook/query, not a self-hosted worker) | SEP-41 is **not enumerable on-chain** (like ERC-20). After unlock, `Investment` ≠ current ownership; a managed Soroban indexer (Mercury/SubQuery/equivalent) feeds holdings from transfer/mint/burn events so we don't run continuous `getEvents` ingestion ourselves | ⏳ Integration not built |
 | 10 | **Money precision** `Decimal(28,7)`; `rewardPerShare` `Decimal(38,18)` | Matches Stellar's 7 decimals; extra precision on the per-share accumulator avoids rounding drift | ✅ Implemented |
-| 11 | **Prisma pinned to `^6`** (not 7) | Prisma 7 drops `url = env()` and requires a driver adapter + `prisma.config.ts` — deferred to avoid friction | ✅ Implemented |
-| 12 | **Shared `ComplianceRegistry` contract** (singleton) holds the single whitelist; every share token queries it (not a per-token list) | One KYC → whitelisted for all campaigns; one place for the backend to add/revoke; gives a home for revocation (expired KYC / sanctions) | ⏳ Contract not built |
+| 11 | **Prisma 7 + driver adapter** (migrated up from `^6`) | Prisma 7 drops `url = env()`; needs a `PrismaPg` adapter, `prisma.config.ts`, and the `prisma-client` generator (output to `generated/prisma`). Migrated once the setup was proven | ✅ Implemented (7.8) |
+| 12 | **Shared `ComplianceRegistry` contract** (singleton) holds the single whitelist; every share token queries it (not a per-token list) | One KYC → whitelisted for all campaigns; one place for the backend to add/revoke; gives a home for revocation (expired KYC / sanctions) | ✅ Built (Phase 1, testnet) |
 | 13 | **Deploy orchestration is backend-driven, async + idempotent — no factory contract** | On approval the backend submits N deploy txs in sequence via a DB state machine (`PENDING → DEPLOYING_TOKEN → DEPLOYING_CAMPAIGN → WIRING → LIVE`), resumable on partial failure (idempotent on the unique `tx_hash` + deterministic salt). A factory adds contract-side complexity not worth it at this scale | ✅ Built (BullMQ on Valkey; `CampaignDeployService` + `CampaignDeployStatus` enum; admin approval is the trigger) |
-| 13 | **Investor onboarding mirrors the entrepreneur flow**: wallet register → KYC → backend whitelists the address; `invest()` is whitelist-gated on-chain | Securities crowdfunding (OJK SCF) requires KYC'd investors; gating in the contract means an unregistered wallet that calls `invest()` directly is *rejected*, not merely discouraged | 🟡 Register + KYC built (shared role-agnostic `KycProfile`, `/auth/register` role INVESTOR, `/kyc` open to both roles); on-chain whitelist ⏳ |
+| 14 | **Investor onboarding mirrors the entrepreneur flow**: wallet register → KYC → backend whitelists the address; `invest()` is whitelist-gated on-chain | Securities crowdfunding (OJK SCF) requires KYC'd investors; gating in the contract means an unregistered wallet that calls `invest()` directly is *rejected*, not merely discouraged | ✅ Register + KYC (shared role-agnostic `KycProfile`) + on-chain whitelist sync built (`src/kyc/kyc-whitelist.*`, BullMQ: approve→`registry.add`, revoke→`registry.remove`) |
 
 ### Key distinction to remember: what "lock" actually locks
 Lock applies to **(a) withdrawing principal** and **(b) transferring the share
@@ -78,17 +86,21 @@ transfer. This is the Soroban equivalent of a permissioned security token
 
 ## Data model (implemented)
 
-10 models in `prisma/schema.prisma`:
+11 models in `prisma/schema.prisma`:
 
 ```
-User ──┬─ proposals (entrepreneur)        Proposal ──1:1──> Campaign
-       ├─ reviews   (admin)                  │                 ├─1:1──> ProjectToken   (isTransferable = lock flag)
-       ├─ investments                        │                 ├─1:1──> CampaignVault  (custody + lock + release)
-       ├─ holdings (TokenHolding)            │                 ├─1:N──> Investment     (lpTokens = pro-rata basis)
-       └─ distributionClaims                 │                 ├─1:N──> TokenHolding   (current ownership, from indexer)
-                                             │                 └─1:N──> ProfitDistribution ─1:N─> DistributionClaim
+User ──┬─ kycProfile (1:1, role-agnostic) Proposal ──1:1──> Campaign
+       ├─ proposals (entrepreneur)           │                 ├─1:1──> ProjectToken   (isTransferable = lock flag)
+       ├─ reviews   (admin)                   │                 ├─1:1──> CampaignVault  (custody + lock + release)
+       ├─ investments                        │                 ├─1:N──> Investment     (lpTokens = pro-rata basis)
+       ├─ holdings (TokenHolding)            │                 ├─1:N──> TokenHolding   (current ownership, from indexer)
+       └─ distributionClaims                 │                 └─1:N──> ProfitDistribution ─1:N─> DistributionClaim
                                              └─1:N──> ProposalReview (approval audit trail)
 ```
+
+`KycProfile` also carries the on-chain whitelist-sync state (`whitelistStatus` +
+tx hashes); `Campaign` carries the deploy state machine (`deployStatus`,
+`deploy_tx_hash`, `wire_tx_hash`).
 
 The DB is an **off-chain mirror** of on-chain state: it stores contract addresses
 + tx hashes, with `tx_hash` unique for idempotent reconciliation.
@@ -167,23 +179,23 @@ What still needs to be built, grouped by area. Check items off as they land.
 - [ ] Unclaimed-dividend policy (rollover vs return) + claim window handling.
 
 ### E. Auth & authorization (wallet-based)
-- [ ] Challenge/nonce endpoint + Stellar signature verification → session/JWT.
-- [ ] Role guards (entrepreneur / admin / investor) over the `roles` array.
-- [ ] Investor onboarding: wallet register → KYC → backend writes the address into `ComplianceRegistry` (the on-chain whitelist).
-- [ ] Whitelist/KYC management: add on approval, **revoke** on expiry/sanction; gates both invest (mint) and post-unlock transfers.
+- [x] Challenge/nonce endpoint + Stellar signature verification → session/JWT. (`src/auth/`; nonce in Valkey.)
+- [x] Role guards (entrepreneur / admin / investor) over the `roles` array. (`JwtAuthGuard`/`RolesGuard`/`ApprovedEntrepreneurGuard`, manual — no passport.)
+- [x] Investor onboarding: wallet register → KYC → backend writes the address into `ComplianceRegistry` (the on-chain whitelist). (`src/kyc/kyc-whitelist.*`, BullMQ.)
+- [x] Whitelist/KYC management: add on approval, **revoke** on expiry/sanction; gates both invest (mint) and post-unlock transfers. (`POST /admin/kyc/:userId/approve|revoke` → `registry.add`/`remove`.)
 
 ### F. API surface (NestJS modules per entity)
-- [ ] Proposals — submit, list, get (entrepreneur).
+- [x] Proposals — submit, list, get (entrepreneur). (`/proposals`, gated by `ApprovedEntrepreneurGuard`.)
 - [x] Reviews — approve/reject workflow (admin) → triggers on-chain deploy. (`POST /admin/proposals/:id/approve|reject`.)
-- [ ] Campaigns — list live/locked, detail.
+- [ ] Campaigns — list live/locked, detail. (Deploy orchestration built; **read/detail endpoints not yet**.)
 - [ ] Investments — invest into a campaign (**whitelisted / KYC'd investors only**), list per investor.
 - [ ] Distributions & Claims — list entitlements, fetch proof, mark claimed.
-- [ ] Validation (DTOs), pagination, error handling.
+- [ ] Validation (DTOs), pagination, error handling. (DTOs + global `ValidationPipe` done; **pagination not yet**.)
 
 ### G. Cross-cutting
-- [ ] Tests (unit + e2e) for services and the indexer.
+- [ ] Tests (unit + e2e) for services and the indexer. (Colocated `*.spec.ts` ship with every service/guard; **indexer tests pending its build**.)
 - [ ] Observability/logging for the indexer and on-chain calls.
-- [ ] Revisit Prisma 7 (driver adapter + `prisma.config.ts`) when convenient.
+- [x] Revisit Prisma 7 (driver adapter + `prisma.config.ts`). (Migrated to 7.8.)
 
 ---
 
