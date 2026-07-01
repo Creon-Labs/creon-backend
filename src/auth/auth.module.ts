@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { ApprovedEntrepreneurGuard } from './guards/approved-entrepreneur.guard';
+import { ApprovedInvestorGuard } from './guards/approved-investor.guard';
 
 @Module({
   imports: [
@@ -21,13 +22,20 @@ import { ApprovedEntrepreneurGuard } from './guards/approved-entrepreneur.guard'
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtAuthGuard, RolesGuard, ApprovedEntrepreneurGuard],
+  providers: [
+    AuthService,
+    JwtAuthGuard,
+    RolesGuard,
+    ApprovedEntrepreneurGuard,
+    ApprovedInvestorGuard,
+  ],
   // Re-export JwtModule so importers of AuthModule get JwtService for the guards.
   exports: [
     AuthService,
     JwtAuthGuard,
     RolesGuard,
     ApprovedEntrepreneurGuard,
+    ApprovedInvestorGuard,
     JwtModule,
   ],
 })
