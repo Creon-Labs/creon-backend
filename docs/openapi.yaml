@@ -29,6 +29,23 @@ tags:
     description: Admin review queues — KYC and funding proposals
   - name: proposals
     description: Entrepreneur funding proposals (off-chain draft → submit)
+  - name: campaigns
+    description: Public browsing of live campaigns (list + detail)
+  - name: investments
+    description: |
+      Investor funding of a live campaign in USDC.
+
+      ### Signing flow (backend prepares, investor signs, backend submits)
+      The on-chain `invest(investor, amount)` requires the investor's own
+      authorization (and pulls their USDC), so the investor must sign — the
+      platform key cannot invest on their behalf. The flow is:
+      1. `POST /campaigns/{campaignId}/investments/prepare` → backend builds &
+         simulates the `invest()` tx **with the investor as source** and returns
+         the unsigned XDR.
+      2. The investor signs the XDR with their wallet (e.g. Freighter).
+      3. `POST /campaigns/{campaignId}/investments` → backend verifies the signed
+         tx, wraps it in a **platform fee-bump** (so the investor pays no XLM
+         fee), submits it, and records the `Investment`.
 
 components:
   securitySchemes:
@@ -61,6 +78,25 @@ components:
         - `UNDER_REVIEW` – an admin is reviewing the proposal
         - `APPROVED` – approved by an admin; creates the campaign mirror and enqueues its on-chain deploy
         - `REJECTED` – rejected by an admin
+
+    CampaignStatus:
+      type: string
+      enum: [PENDING_DEPLOYMENT, ACTIVE, LOCKED, GOAL_REACHED, COMPLETED, CANCELLED]
+      description: |
+        - `PENDING_DEPLOYMENT` – campaign mirror created; on-chain contracts not yet live
+        - `ACTIVE` – contracts live and open for investment (funding)
+        - `LOCKED` – capital locked (principal + share transfer)
+        - `GOAL_REACHED` – funding goal met
+        - `COMPLETED` – campaign settled
+        - `CANCELLED` – campaign cancelled
+
+    InvestmentStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, FAILED]
+      description: |
+        - `PENDING` – recorded but not yet confirmed on-chain
+        - `CONFIRMED` – the `invest()` tx succeeded on-chain and shares were minted
+        - `FAILED` – the investment did not complete
 
     # ── Request bodies ─────────────────────────────────────────────────────────
     ChallengeRequest:
@@ -210,6 +246,27 @@ components:
           minimum: 1
           maximum: 3650
           example: 180
+
+    PrepareInvestmentRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: string
+          pattern: '^\d+(\.\d{1,7})?$'
+          description: USDC amount to invest as a decimal string (up to 7 decimals, must be > 0)
+          example: "500.0000000"
+
+    SubmitInvestmentRequest:
+      type: object
+      required: [signedXdr]
+      properties:
+        signedXdr:
+          type: string
+          description: |
+            Base64 XDR of the investor-signed `invest()` transaction envelope
+            (the XDR returned by the `prepare` endpoint, signed by the wallet).
+          example: AAAAAgAAAAA...
 
     # ── Responses ──────────────────────────────────────────────────────────────
     ChallengeResponse:
@@ -477,6 +534,98 @@ components:
           type: string
           format: date-time
         updatedAt:
+          type: string
+          format: date-time
+
+    Campaign:
+      type: object
+      description: Public campaign view (list + detail).
+      required: [id, goalAmount, raisedAmount, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        contractAddress:
+          type: [string, 'null']
+          minLength: 56
+          maxLength: 56
+          description: Soroban Campaign contract address (C…); null until the deploy is live
+        goalAmount:
+          type: string
+          description: Funding goal as a decimal string (7 decimals)
+          example: "10000.0000000"
+        raisedAmount:
+          type: string
+          description: Total confirmed invested so far, as a decimal string (7 decimals)
+          example: "2500.0000000"
+        status:
+          $ref: '#/components/schemas/CampaignStatus'
+        lockEndAt:
+          type: [string, 'null']
+          format: date-time
+        startAt:
+          type: [string, 'null']
+          format: date-time
+        endAt:
+          type: [string, 'null']
+          format: date-time
+        projectToken:
+          type: [object, 'null']
+          description: The campaign's restricted SEP-41 share token.
+          properties:
+            assetCode:
+              type: string
+              maxLength: 12
+              example: WARUNGBU1234
+            contractAddress:
+              type: [string, 'null']
+              minLength: 56
+              maxLength: 56
+              description: ShareToken contract address (C…); null until deployed
+
+    PrepareInvestmentResponse:
+      type: object
+      required: [campaignId, xdr]
+      properties:
+        campaignId:
+          type: string
+          format: uuid
+        xdr:
+          type: string
+          description: |
+            Base64 XDR of the unsigned, prepared `invest()` transaction (investor
+            as source). Sign it with the wallet and post it back to the submit endpoint.
+          example: AAAAAgAAAAA...
+
+    Investment:
+      type: object
+      required: [id, campaignId, amount, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        campaignId:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          description: Invested USDC amount as a decimal string (7 decimals)
+          example: "500.0000000"
+        lpTokens:
+          type: [string, 'null']
+          description: Shares received (minted 1:1 with the USDC invested), as a decimal string
+          example: "500.0000000"
+        txHash:
+          type: [string, 'null']
+          minLength: 64
+          maxLength: 64
+          description: Hex-encoded Stellar transaction hash of the on-chain `invest()`
+        status:
+          $ref: '#/components/schemas/InvestmentStatus'
+        investedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
           type: string
           format: date-time
 
@@ -1220,3 +1369,183 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  /campaigns:
+    get:
+      tags: [campaigns]
+      summary: List live campaigns
+      description: |
+        Public, unauthenticated. Returns campaigns whose on-chain contracts are
+        live (deploy complete), newest first — the investment marketplace.
+      operationId: campaignList
+      security: []
+      responses:
+        '200':
+          description: Live campaigns
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Campaign'
+
+  /campaigns/{id}:
+    get:
+      tags: [campaigns]
+      summary: Get campaign detail
+      description: |
+        Public, unauthenticated. Returns a single campaign, including its on-chain
+        contract + share-token addresses (needed to prepare an investment).
+      operationId: campaignGet
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the campaign
+      responses:
+        '200':
+          description: Campaign detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /campaigns/{campaignId}/investments/prepare:
+    post:
+      tags: [investments]
+      summary: Prepare an invest() transaction
+      description: |
+        Builds and simulates an `invest()` transaction **sourced at the investor's
+        wallet** and returns the unsigned XDR for the wallet to sign. Requires the
+        `INVESTOR` role **and** an `APPROVED` KYC profile; otherwise **403**. The
+        campaign must be live/active — otherwise **409**. No `Investment` row is
+        created at this step.
+      operationId: investmentPrepare
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the campaign to invest in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrepareInvestmentRequest'
+      responses:
+        '200':
+          description: Unsigned prepared transaction XDR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrepareInvestmentResponse'
+        '400':
+          description: Validation error (e.g. amount ≤ 0)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Campaign is not open for investment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /campaigns/{campaignId}/investments:
+    post:
+      tags: [investments]
+      summary: Submit a signed invest() transaction
+      description: |
+        Verifies the investor-signed transaction really is this investor's
+        `invest()` on this campaign, wraps it in a **platform fee-bump**, submits
+        it on-chain, and — on success — records the `Investment` (`CONFIRMED`) and
+        bumps the campaign's `raisedAmount` and vault balance. Idempotent on the
+        transaction hash: re-submitting the same signed tx returns the existing
+        `Investment` instead of duplicating it. Requires the `INVESTOR` role and an
+        `APPROVED` KYC profile.
+      operationId: investmentSubmit
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the campaign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitInvestmentRequest'
+      responses:
+        '201':
+          description: Investment recorded (CONFIRMED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Investment'
+        '400':
+          description: |
+            Malformed XDR, or the tx does not match the expected `invest()` for
+            this campaign/investor (wrong contract, function, investor, or amount).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Campaign is not open for investment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /investments/mine:
+    get:
+      tags: [investments]
+      summary: List own investments
+      description: |
+        Returns the authenticated investor's own investments, newest first.
+        Requires the `INVESTOR` role.
+      operationId: investmentListMine
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The caller's investments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Investment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'

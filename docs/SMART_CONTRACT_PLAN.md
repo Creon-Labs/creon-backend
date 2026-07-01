@@ -150,16 +150,32 @@ _(Implemented + unit-tested; on-chain e2e pending a funded `STELLAR_PLATFORM_SEC
 
 **Goal:** whitelisted investors fund a live campaign in USDC and receive shares.
 
+**Signing model (decided):** **backend-prepares-XDR → investor-signs → backend-submits
+(platform fee-bump).** `invest()` calls `investor.require_auth()` and pulls the investor's
+USDC via a direct `transfer`, so the investor must sign — the platform key can't invest on
+their behalf. Backend builds + simulates the tx with the **investor as source** (one signature
+covers both the call and the inner USDC transfer), returns the XDR; the wallet signs; backend
+wraps it in a **platform fee-bump** (so the investor needs only USDC, not XLM) and submits.
+A fee-bump does not consume the platform's sequence number, so this stays **synchronous** with
+no queue. Verification + recording is idempotent on the stable inner tx hash.
+
 **Deliverables**
-- [ ] Investments module: invest into a campaign (whitelisted/KYC'd only),
-      list-per-investor, campaign list/detail (live/locked).
-- [ ] Backend path to surface/relay the `invest()` interaction (build/submit or hand
-      the investor wallet a prepared tx — decide signing model here).
-- [ ] Persist `Investment` rows (historical purchase record; `lpTokens` = pro-rata basis).
-- [ ] DTOs + validation + tests.
+- [x] Investments module: invest into a campaign (whitelisted/KYC'd only, `ApprovedInvestorGuard`),
+      list-per-investor (`GET /investments/mine`), campaign list/detail (`CampaignController`:
+      public `GET /campaigns`, `GET /campaigns/:id`). (`src/investment/`, `src/campaign/campaign.controller.ts`.)
+- [x] Backend path to relay the `invest()` interaction: `POST /campaigns/:id/investments/prepare`
+      returns the unsigned XDR; `POST /campaigns/:id/investments` verifies + fee-bumps + submits the
+      signed tx. New `SorobanService` primitives: `buildInvokeTransaction`, `submitSignedTransaction`
+      (fee-bump), `decodeInvokeContract`, `transactionHash`, `readAddress`/`readI128`.
+- [x] Persist `Investment` rows (CONFIRMED, `txHash` = inner hash, `lpTokens` = amount at 1:1 mint);
+      bump `Campaign.raisedAmount` + `CampaignVault.totalDeposited` in one transaction.
+- [x] DTOs + validation + tests (`prepare`/`submit`/`listMine` branches, verification failures,
+      idempotency, `ApprovedInvestorGuard`, campaign reads).
 
 **Acceptance:** a whitelisted investor invests USDC and the campaign vault balance +
 their `ShareToken` balance increase; a non-whitelisted attempt is rejected on-chain.
+_(Implemented + unit-tested; on-chain e2e pending a funded `STELLAR_PLATFORM_SECRET` + a
+whitelisted investor account with test USDC — same caveat as Phases 2–3.)_
 
 **Depends on:** Phases 1–3.
 
