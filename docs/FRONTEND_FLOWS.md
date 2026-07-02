@@ -1,324 +1,302 @@
 # Frontend Integration Flows
 
-This document explains the flows a frontend needs to implement to work with
-`creon-backend`. It's written around *what the user does* and *what the wallet
-needs to sign*, not the internal service architecture (see `ARCHITECTURE.md`
-for that). Full request/response shapes are in `openapi.yaml` — this doc is
-the "why and in what order."
+What a frontend needs to implement to work with `creon-backend`, written around
+*what the user does* and *what the wallet signs* — not the internal service
+architecture (see `ARCHITECTURE.md`). Full request/response shapes live in
+`openapi.yaml`; this doc is the "why and in what order."
 
-## Core concepts before you start
+## Core concepts (read first)
 
-**Wallet-auth, not passwords.** There's no email/password. Identity = a
-Stellar keypair. The frontend needs a Stellar wallet integration (Freighter,
-xBull, or any signer that can sign an arbitrary payload / classic tx) that can:
-1. Return the user's public key (`G...`, 56 chars).
-2. Sign a raw UTF-8 message and return a base64 signature (for auth).
-3. Sign a base64 XDR transaction envelope and return the signed base64 XDR
-   (for on-chain actions).
+**Wallet-auth, not passwords.** Identity = a Stellar keypair. You need a wallet
+integration (Freighter, xBull, or any signer) that can:
+1. Return the public key (`G...`, 56 chars).
+2. Sign a raw UTF-8 message → base64 signature (for auth).
+3. Sign a base64 XDR tx envelope → signed base64 XDR (for on-chain actions).
 
-**JWT.** Every authenticated call needs `Authorization: Bearer <token>`. The
-token is minted at register/login, embeds `{ sub: userId, roles: Role[] }`,
-and expires in **7 days** (`JWT_EXPIRES_IN`). There's no refresh endpoint —
-when it expires, re-run the login flow (challenge → sign → login).
+**JWT.** Every authenticated call needs `Authorization: Bearer <token>`. Minted
+at register/login, embeds `{ sub: userId, roles: Role[] }`, expires in **7 days**
+(`JWT_EXPIRES_IN`). No refresh endpoint — on expiry, re-run login.
 
-**The relay pattern (prepare → sign → submit).** Anything that touches the
-investor's or entrepreneur's own USDC/shares (`invest`, `deposit_profit`,
-`claim`) needs *their* signature — the contract checks `require_auth()` on
-that address. The platform can't sign on their behalf. So these actions are
-always two calls:
-1. `POST .../prepare` → backend builds an unsigned transaction and returns
-   `{ xdr }` (base64 XDR, source account = the user's wallet).
-2. Frontend has the wallet sign that exact XDR (do not modify it) and gets
-   back a signed XDR.
+**The relay pattern (prepare → sign → submit).** Anything touching the user's own
+USDC/shares (`invest`, `deposit_profit`, `claim`) needs *their* signature — the
+contract checks `require_auth()`. The platform can't sign for them, so these are
+always three steps:
+1. `POST .../prepare` → backend returns `{ xdr }` (unsigned, source = user's wallet).
+2. Wallet signs that **exact** XDR (do not modify it) → signed XDR.
 3. `POST .../submit` with `{ signedXdr }` → backend verifies the decoded call
-   matches what was expected (contract, function, args, caller), **fee-bumps
-   it with the platform account**, submits to the network, and records the
-   result.
+   matches what it expected (contract, function, args, caller), **fee-bumps with
+   the platform account**, submits, and records the result.
 
-This means **the user never pays network fees** and never needs XLM in their
-wallet — they only need USDC (and a wallet that can sign Soroban invoke
-transactions). Submit endpoints are idempotent: retrying with the same signed
-XDR returns the already-recorded row instead of erroring or double-submitting.
+Consequences: the **user never pays network fees** and needs no XLM — only USDC
+(plus a wallet that signs Soroban invoke txs). Submit endpoints are **idempotent**:
+re-submitting the same signed XDR returns the recorded row instead of double-submitting.
 
-**Roles.** A user can hold `ENTREPRENEUR`, `INVESTOR`, or both. `ADMIN` is
-seed-only — never surfaced at registration. KYC is **per-user, not per-role**:
-one KYC submission covers both if the user is registered as both.
+**Roles.** A user holds `ENTREPRENEUR`, `INVESTOR`, or both. `ADMIN` is seed-only,
+never surfaced at registration. **KYC is per-user, not per-role** — one submission
+covers both roles.
 
-**Two independent approval gates.** KYC approval (identity) and campaign
-approval (proposal review) are separate admin actions with separate statuses
-— don't conflate them in the UI.
+**Two independent approval gates.** KYC approval (identity) and campaign approval
+(proposal review) are separate admin actions with separate statuses — don't
+conflate them in the UI.
 
 ---
 
 ## Flow 1 — Register / Login (wallet-signature auth)
 
-Same challenge-response mechanism for both; the only difference is which
-endpoint you call at the end.
+Same challenge-response for both; only the final endpoint differs.
 
-```
-1. POST /auth/challenge  { walletAddress }
-   -> { message }                      // a fixed-format multi-line string
+**Steps**
+1. Request a challenge for the wallet address.
+2. Wallet signs the returned `message` **as raw bytes** (a message signature, *not*
+   a transaction) → `signatureB64`.
+3. Call **register** (new user) or **login** (existing) with the signature → `accessToken`.
+4. Store the token; attach `Authorization: Bearer <token>` on every later call.
 
-2. Wallet signs `message` as raw bytes (NOT a transaction — a plain message
-   signature) -> signatureB64
+**Endpoints**
 
-3a. New user:
-    POST /auth/register { walletAddress, signature, role, email?, displayName? }
-    -> { accessToken }
+| Step | Method + Path | Body → returns |
+|---|---|---|
+| 1 | `POST /auth/challenge` | `{ walletAddress }` → `{ message }` (fixed-format multi-line string) |
+| 3a | `POST /auth/register` | `{ walletAddress, signature, role, email?, displayName? }` → `{ accessToken }` |
+| 3b | `POST /auth/login` | `{ walletAddress, signature }` → `{ accessToken }` |
 
-3b. Existing user:
-    POST /auth/login { walletAddress, signature }
-    -> { accessToken }
-```
-
-Notes:
-- The challenge is single-use and expires in 5 minutes (`AUTH_CHALLENGE_TTL_SECONDS`)
-  — sign and submit promptly, and re-request a fresh challenge if register/login
-  fails with 401.
-- `role` at register is `ENTREPRENEUR` or `INVESTOR` only (pick based on which
-  onboarding flow the user started). `email` is **required when role is
-  ENTREPRENEUR**, optional otherwise. A wallet can only register once; to add
-  the other role for the same person there is currently no "add role" endpoint
-  — treat each wallet as single-role in the UI.
-- `login` is not role-restricted — any registered wallet (including a
-  DB-provisioned admin) can log in with it.
-- Store `accessToken` (e.g. in memory + secure storage); attach as
-  `Authorization: Bearer <token>` on every subsequent call.
+**Caveats**
+- **Challenge is single-use, expires in 5 min** (`AUTH_CHALLENGE_TTL_SECONDS`) —
+  sign promptly; re-request a fresh challenge if register/login fails with 401.
+- **`role` is `ENTREPRENEUR` or `INVESTOR` only** (pick from the onboarding flow
+  the user started). `email` is **required when role is ENTREPRENEUR**, optional
+  otherwise.
+- **One registration per wallet** — there's no "add role" endpoint; treat each
+  wallet as single-role in the UI.
+- **`login` is not role-restricted** — any registered wallet (incl. a seeded
+  admin) can log in.
 
 ---
 
 ## Flow 2 — KYC submission & approval
 
-Applies identically to entrepreneurs and investors — same endpoint, gated by
-role via `@Roles`.
+Off-chain submission, identical for entrepreneurs and investors (gated by role via
+`@Roles`).
 
-```
-POST /kyc   (multipart/form-data, auth required)
-  fields: fullName, nationalId (16-digit NIK), dateOfBirth? (YYYY-MM-DD)
-  files:  idCard (jpeg/png, ≤5MB), selfie (jpeg/png, ≤5MB)
--> { status: "PENDING", submittedAt }
+**Steps**
+1. Submit identity fields + ID card and selfie images (multipart).
+2. Poll status until an admin decides (no push/webhook).
 
-GET /kyc/me   (auth required)
--> { status: "PENDING" | "APPROVED" | "REJECTED" | "REVOKED", ... }
-```
+**Endpoints**
 
-- `nationalId` is globally unique — a second submission with a NIK already
-  used by another account gets **409 Conflict**. Surface this as "this ID has
-  already been used to verify a different account."
-- Resubmitting while PENDING/REJECTED overwrites the profile (upsert) and
-  resets status to PENDING.
-- **Poll `GET /kyc/me`** after submission to reflect admin's decision — there's
-  no push/webhook. A reasonable interval is every 10–30s while status is
-  PENDING, or just prompt the user to check back.
-- Downstream gating: `ApprovedEntrepreneurGuard` / `ApprovedInvestorGuard`
-  block proposal-writes and investment/claim endpoints with **403** until
-  `KycProfile.status === APPROVED`. Show a clear "verify your identity first"
-  state rather than letting the user hit a raw 403.
-- `REVOKED` (admin can revoke a previously-approved KYC) behaves like
-  not-approved for all gates — treat it the same as REJECTED in the UI, but
-  the copy should probably differ ("your verification was revoked" vs "your
-  submission was rejected").
+| Step | Method + Path | Body → returns |
+|---|---|---|
+| 1 | `POST /kyc` (multipart) | fields: `fullName`, `nationalId` (16-digit NIK), `dateOfBirth?` (YYYY-MM-DD); files: `idCard`, `selfie` (jpeg/png, ≤5MB) → `{ status: "PENDING", submittedAt }` |
+| 2 | `GET /kyc/me` | → `{ status: "PENDING" \| "APPROVED" \| "REJECTED" \| "REVOKED", ... }` |
 
-Admin side (for an admin-facing UI, if you're building one):
-`GET /admin/kyc?status=PENDING`, `POST /admin/kyc/:userId/approve`,
-`POST /admin/kyc/:userId/reject { reason }`, `POST /admin/kyc/:userId/revoke { reason }`.
-Approve/revoke each kick off an async on-chain whitelist sync — the KYC
-`status` flips immediately, but the *investor's ability to actually invest*
-additionally depends on the whitelist landing on-chain (see Flow 4 caveat).
+**Caveats**
+- **`nationalId` is globally unique → 409 Conflict** if reused by another account.
+  Surface as "this ID has already been used to verify a different account."
+- **Resubmitting while PENDING/REJECTED** overwrites the profile (upsert) and
+  resets to PENDING.
+- **Poll `GET /kyc/me`** (~every 10–30s while PENDING) or prompt the user to check back.
+- **Downstream gates return 403 until APPROVED** (`ApprovedEntrepreneurGuard` /
+  `ApprovedInvestorGuard` on proposal-writes and invest/claim). Show a "verify
+  your identity first" state instead of a raw 403.
+- **`REVOKED`** (admin revokes a previously-approved KYC) blocks all gates like
+  REJECTED — treat the same, but copy should differ ("verification was revoked" vs
+  "submission was rejected").
+
+**Admin side** (only if building an admin UI): `GET /admin/kyc?status=PENDING`,
+`POST /admin/kyc/:userId/approve`, `.../reject { reason }`, `.../revoke { reason }`.
+Approve/revoke kick off an async on-chain whitelist sync — the KYC `status` flips
+immediately, but the investor's *ability to actually invest* also depends on the
+whitelist landing on-chain (see Flow 4 caveat).
 
 ---
 
 ## Flow 3 — Entrepreneur: submit a funding proposal
 
-Off-chain only — no contract is touched here.
+Off-chain only — no contract touched. All write routes require
+`ApprovedEntrepreneurGuard` (role + KYC APPROVED), so build KYC first and gate the
+"New Proposal" button on `GET /kyc/me`.
 
-```
-POST   /proposals               { businessName, businessDescription, category,
-                                   location?, requestedAmount, lockPeriodDays }
-       -> proposal (status: DRAFT)
+**Steps**
+1. Create a proposal (starts as `DRAFT`).
+2. Edit while `DRAFT` (optional).
+3. Submit → `DRAFT → SUBMITTED` (locks editing).
+4. Poll for the admin decision.
 
-PATCH  /proposals/:id           (any subset of the above fields)
-       -> only allowed while status === DRAFT
+**Endpoints**
 
-POST   /proposals/:id/submit    -> DRAFT -> SUBMITTED (locks editing)
+| Step | Method + Path | Notes |
+|---|---|---|
+| 1 | `POST /proposals` | `{ businessName, businessDescription, category, location?, requestedAmount, lockPeriodDays }` → proposal (`DRAFT`) |
+| 2 | `PATCH /proposals/:id` | any subset of the above; **only while `DRAFT`** |
+| 3 | `POST /proposals/:id/submit` | `DRAFT → SUBMITTED` |
+| 4 | `GET /proposals` / `GET /proposals/:id` | caller's own only (404 if not theirs) |
 
-GET    /proposals                -> caller's own proposals
-GET    /proposals/:id             -> caller's own proposal (404 if not theirs)
-```
-
-- All write routes require `ApprovedEntrepreneurGuard` (role + KYC APPROVED)
-  — build the KYC flow first, gate the "New Proposal" button on
-  `GET /kyc/me` status.
-- `requestedAmount` is a **string** (`"1500.5000000"`-style, up to 7 decimals)
-  — never send a JS `number` for money fields anywhere in this API.
-- `lockPeriodDays` is an integer 1–3650; this becomes the on-chain lock
-  duration once the campaign deploys, so make its meaning clear in the form
-  ("investors' principal is locked for this many days after go-live").
-- Once SUBMITTED, the proposal is read-only for the entrepreneur; wait for an
-  admin decision. There is no proposal detail push — poll `GET /proposals/:id`
-  and watch `status` move to `APPROVED`/`REJECTED`, or `UNDER_REVIEW` in
-  between.
+**Caveats**
+- **`requestedAmount` is a string** (`"1500.5000000"`, up to 7 decimals) — never
+  send a JS `number` for money fields anywhere in this API.
+- **`lockPeriodDays` is an integer 1–3650** → becomes the on-chain principal-lock
+  duration after deploy; make its meaning clear ("principal locked this many days
+  after go-live").
+- **SUBMITTED is read-only** for the entrepreneur — poll `GET /proposals/:id` and
+  watch `status` move to `UNDER_REVIEW` → `APPROVED` / `REJECTED`.
 
 ---
 
 ## Flow 4 — Campaign auto-deploy (system-driven, no user action)
 
 When an admin approves a proposal (`POST /admin/proposals/:id/approve`), the
-backend synchronously creates a `Campaign` row and **asynchronously** deploys
-the on-chain contracts (`ShareToken` + `Campaign`, wiring `set_minter`, then
-flipping the campaign live). This can take anywhere from seconds to a couple
-minutes and is entirely backend-driven — nothing for the frontend to trigger.
+backend synchronously creates a `Campaign` row and **asynchronously** deploys the
+contracts (`ShareToken` + `Campaign`, wires `set_minter`, flips live). Takes
+seconds to a couple of minutes; nothing for the frontend to trigger.
 
-What the frontend does:
-- After a proposal is APPROVED, poll `GET /campaigns/:id` (public, no auth)
-  and watch `deployStatus` progress:
-  `PENDING → DEPLOYING_TOKEN → DEPLOYING_CAMPAIGN → WIRING → LIVE` (or `FAILED`).
-- A campaign is only investable once `deployStatus === "LIVE"` **and**
-  `status === "ACTIVE"`; the invest-prepare endpoint returns 409 otherwise. Gate
-  the "Invest" button on both fields, not just presence of a `contractAddress`.
-- Browse endpoints are public and unauthenticated: `GET /campaigns` (only
-  returns LIVE ones) and `GET /campaigns/:id`.
+**Steps**
+1. After a proposal is APPROVED, poll `GET /campaigns/:id` (public, no auth).
+2. Watch `deployStatus`: `PENDING → DEPLOYING_TOKEN → DEPLOYING_CAMPAIGN → WIRING → LIVE`
+   (or `FAILED`).
+3. Enable "Invest" only when `deployStatus === "LIVE"` **and** `status === "ACTIVE"`.
 
-**Investor whitelist caveat (important ordering issue):** an investor's wallet
-must be added to the on-chain compliance registry before their `invest()` tx
-will succeed — this happens automatically after KYC approval via the same
-kind of async orchestrator, tracked as `KycProfile.whitelistStatus`
-(`NOT_SYNCED → ADDING → WHITELISTED`). This isn't directly exposed on
-`GET /kyc/me` today, so in practice: **if an investor's first `invest`
-attempt fails right after their KYC was just approved, it's very likely the
-whitelist sync hasn't landed yet — show a retry/backoff message rather than a
-hard error**, since the contract itself will reject a non-whitelisted
-`invest()` call.
+**Endpoints**
+
+| Method + Path | Notes |
+|---|---|
+| `GET /campaigns` | public; returns **LIVE** campaigns only |
+| `GET /campaigns/:id` | public; poll `deployStatus` / `status` here |
+
+**Caveats**
+- **Gate "Invest" on both `deployStatus === "LIVE"` and `status === "ACTIVE"`** —
+  not just the presence of a `contractAddress`. The invest-prepare endpoint 409s otherwise.
+- **Investor whitelist ordering (important):** an investor's wallet must be added
+  to the on-chain compliance registry before `invest()` succeeds. This happens
+  automatically after KYC approval via a separate async orchestrator, tracked as
+  `KycProfile.whitelistStatus` (`NOT_SYNCED → ADDING → WHITELISTED`) — **not
+  currently exposed on `GET /kyc/me`**. So if an investor's first `invest` fails
+  right after KYC approval, the whitelist sync likely hasn't landed yet — show a
+  retry/backoff message, not a hard error (the contract rejects non-whitelisted
+  `invest()`).
 
 ---
 
 ## Flow 5 — Investor: invest in a campaign
 
-Relay pattern (see Core Concepts). Requires `INVESTOR` role + approved KYC
-(`ApprovedInvestorGuard`) and the campaign to be LIVE/ACTIVE.
+Relay pattern (see Core concepts). Requires `INVESTOR` + approved KYC
+(`ApprovedInvestorGuard`) and a LIVE/ACTIVE campaign.
 
-```
-POST /campaigns/:campaignId/investments/prepare   { amount }
-  -> { campaignId, xdr }
+**Steps**
+1. `prepare` with an amount → `{ campaignId, xdr }`.
+2. Wallet signs the XDR.
+3. `submit` the signed XDR → confirmed `Investment` (synchronous, no polling).
+4. Read holdings/history as needed.
 
-[wallet signs xdr]
+**Endpoints**
 
-POST /campaigns/:campaignId/investments           { signedXdr }
-  -> Investment { id, campaignId, amount, lpTokens, txHash, status, investedAt }
+| Step | Method + Path | Body → returns |
+|---|---|---|
+| 1 | `POST /campaigns/:campaignId/investments/prepare` | `{ amount }` → `{ campaignId, xdr }` |
+| 3 | `POST /campaigns/:campaignId/investments` | `{ signedXdr }` → `Investment { id, campaignId, amount, lpTokens, txHash, status, investedAt }` |
+| 4 | `GET /investments/mine` | caller's purchase history |
+| 4 | `GET /holdings/mine` | **live** on-chain-derived balances |
 
-GET  /investments/mine   -> caller's own investment history
-```
-
-- `amount` is USDC, string, up to 7 decimals, must be > 0.
-- Shares (`lpTokens`) are minted **1:1** with USDC invested at confirm time.
-- The investor's wallet needs a USDC trustline and sufficient USDC balance
-  *before* preparing — if the invest call fails on submit due to insufficient
-  balance/trustline, surface that plainly (the backend doesn't pre-check
-  balance, the contract will simply reject the tx).
-- Shares are **non-transferable during the lock period** (restricted SEP-41)
-  — don't build any "sell/transfer shares" UI; there isn't one.
-- `status` on the returned Investment is `CONFIRMED` once submit succeeds
-  (submit is synchronous end-to-end — no polling needed here, unlike deploy).
-- To show the investor's current portfolio value/ownership, prefer
-  `GET /holdings/mine` (live on-chain-derived balances) over summing
-  `/investments/mine` — the latter is a historical ledger of purchases, not
-  current ownership, and won't reflect balances correctly if the platform
-  ever adds a transfer path later.
+**Caveats**
+- **`amount` is USDC, string, up to 7 decimals, > 0.**
+- **Shares (`lpTokens`) mint 1:1 with USDC** at confirm time.
+- **Wallet needs a USDC trustline + balance before `prepare`** — the backend
+  doesn't pre-check; the contract rejects the tx on submit. Surface that plainly.
+- **Shares are non-transferable during the lock** (restricted SEP-41) — don't
+  build any sell/transfer UI.
+- **`status` is `CONFIRMED` once submit succeeds** (submit is synchronous — no
+  polling here, unlike deploy).
+- **For portfolio/ownership, prefer `GET /holdings/mine`** over summing
+  `/investments/mine` — the latter is a historical purchase ledger, not current
+  ownership.
 
 ---
 
 ## Flow 6 — Entrepreneur: distribute dividends (deposit profit)
 
-Same relay shape as invest. Requires `ENTREPRENEUR` role + approved KYC, and
-the caller must own the campaign (guard checks `proposal.entrepreneurId`).
+Relay pattern. Requires `ENTREPRENEUR` + approved KYC, and the caller must own the
+campaign (guard checks `proposal.entrepreneurId`).
 
-```
-POST /campaigns/:campaignId/distributions/deposit/prepare   { amount }
-  -> { campaignId, xdr }
+**Steps**
+1. `prepare` with a profit amount → `{ campaignId, xdr }`.
+2. Wallet signs the XDR.
+3. `submit` → returns **immediately** with `status: "PENDING"`.
+4. Poll the distribution until `status === "COMPLETED"` (background job builds the
+   Merkle snapshot + posts `set_distribution` on-chain) **before** telling investors
+   dividends are claimable.
 
-[wallet signs xdr]
+**Endpoints**
 
-POST /campaigns/:campaignId/distributions/deposit           { signedXdr }
-  -> ProfitDistribution { id, onchainId, totalAmount, status: "PENDING", ... }
+| Step | Method + Path | Body → returns |
+|---|---|---|
+| 1 | `POST /campaigns/:campaignId/distributions/deposit/prepare` | `{ amount }` → `{ campaignId, xdr }` |
+| 3 | `POST /campaigns/:campaignId/distributions/deposit` | `{ signedXdr }` → `ProfitDistribution { id, onchainId, totalAmount, status: "PENDING", ... }` |
+| 4 | `GET /campaigns/:campaignId/distributions` | all distributions for a campaign (public) |
 
-GET  /campaigns/:campaignId/distributions   -> all distributions for a campaign (public)
-```
-
-- `amount` is USDC profit being deposited, string, > 0. The entrepreneur's
-  wallet needs the USDC to deposit (same trustline/balance caveat as invest).
-- The deposit submit call returns **immediately** with `status: "PENDING"` —
-  the actual Merkle snapshot build + on-chain `set_distribution` call happens
-  **asynchronously** in the background (can take a bit, similar to campaign
-  deploy). **Poll `GET /campaigns/:campaignId/distributions` (or track the
-  returned `id`) until that distribution's `status` becomes `COMPLETED`**
-  before telling investors dividends are claimable — a PENDING distribution
-  has no claims to fetch yet.
-- `totalShares`/`rewardPerShare`/`merkleRoot` are populated once the
-  background job finishes; treat them as absent/loading while PENDING.
-- Entitlements are computed by **snapshotting current share holders at the
-  moment the deposit confirms** (integer-floor pro-rata) — there is no
-  "eligible as of" date the frontend needs to manage; it's automatic.
+**Caveats**
+- **`amount` is USDC profit, string, > 0**; wallet needs the USDC (same
+  trustline/balance caveat as invest).
+- **Submit returns PENDING; the on-chain work is async.** Poll until `COMPLETED` —
+  a PENDING distribution has no claims to fetch yet.
+- **`totalShares` / `rewardPerShare` / `merkleRoot` populate once the job finishes**
+  — treat as absent/loading while PENDING.
+- **Entitlements snapshot current holders at deposit-confirm time** (integer-floor
+  pro-rata) — no "eligible as of" date to manage; it's automatic.
 
 ---
 
 ## Flow 7 — Investor: claim a dividend
 
-Relay pattern again. Requires `INVESTOR` role + approved KYC.
+Relay pattern. Requires `INVESTOR` + approved KYC.
 
-```
-GET  /distributions/mine   -> caller's own entitlements across all campaigns
-  -> DistributionClaim[] { id, distributionId, amount, status, distribution: { onchainId, campaignId, status } }
+**Steps**
+1. List entitlements to find claimable rows.
+2. `prepare` a claim for a distribution → `{ distributionId, xdr }`.
+3. Wallet signs the XDR.
+4. `submit` → `status: "CLAIMED"`; USDC lands directly in the wallet on-chain.
 
-POST /distributions/:distributionId/claim/prepare   (no body)
-  -> { distributionId, xdr }
+**Endpoints**
 
-[wallet signs xdr]
+| Step | Method + Path | Body → returns |
+|---|---|---|
+| 1 | `GET /distributions/mine` | `DistributionClaim[] { id, distributionId, amount, status, distribution: { onchainId, campaignId, status } }` |
+| 2 | `POST /distributions/:distributionId/claim/prepare` | (no body) → `{ distributionId, xdr }` |
+| 4 | `POST /distributions/:distributionId/claim` | `{ signedXdr }` → `DistributionClaim { ..., status: "CLAIMED", claimTxHash, claimedAt }` |
 
-POST /distributions/:distributionId/claim           { signedXdr }
-  -> DistributionClaim { ..., status: "CLAIMED", claimTxHash, claimedAt }
-```
-
-- Only show a "Claim" button when the claim's `status === "PENDING"` **and**
-  its nested `distribution.status === "COMPLETED"` — prepare will 409 if the
-  distribution's Merkle root hasn't been posted on-chain yet (still PENDING),
-  or if there's simply no entitlement row for that user (they held zero
-  shares at snapshot time — `GET /distributions/mine` just won't list it).
-- Claiming is **not time-limited** — unclaimed dividends stay claimable
-  indefinitely (the contract has no expiry/reclaim), so there's no "expires
-  in X days" messaging needed.
-- `amount` on the claim is the investor's fixed entitlement in USDC —
-  it's pinned by the Merkle tree server-side, the investor can't choose a
-  partial amount.
-- After a successful claim, USDC lands directly in the investor's wallet
-  on-chain — no separate "withdraw" step.
+**Caveats**
+- **Show "Claim" only when the claim's `status === "PENDING"` AND its nested
+  `distribution.status === "COMPLETED"`** — `prepare` 409s if the Merkle root isn't
+  posted yet (distribution still PENDING) or there's no entitlement row (held zero
+  shares at snapshot; it simply won't appear in `/distributions/mine`).
+- **Claiming is not time-limited** — unclaimed dividends stay claimable indefinitely
+  (no expiry/reclaim); no "expires in X days" messaging needed.
+- **`amount` is the fixed entitlement**, pinned by the Merkle tree server-side — the
+  investor can't choose a partial amount.
+- **No separate "withdraw" step** — USDC lands in the wallet on a successful claim.
 
 ---
 
 ## Status field cheat-sheet
 
-Quick reference for what to poll and what each value means, for building
-loading/empty states without re-reading the backend source.
+What to poll and what each value means, for loading/empty states.
 
 | Entity | Field | Frontend-relevant values |
 |---|---|---|
 | KYC | `KycProfile.status` | `PENDING` (wait) → `APPROVED` (unlocked) / `REJECTED` / `REVOKED` (blocked, resubmit) |
 | Proposal | `Proposal.status` | `DRAFT` (editable) → `SUBMITTED` → `UNDER_REVIEW` → `APPROVED` / `REJECTED` |
-| Campaign | `Campaign.deployStatus` | `PENDING`…`WIRING` (show "deploying") → `LIVE` (usable) / `FAILED` |
-| Campaign | `Campaign.status` | `PENDING_DEPLOYMENT` → `ACTIVE` (investable) → `LOCKED`/`GOAL_REACHED`/`COMPLETED`/`CANCELLED` |
-| Investment | `Investment.status` | `CONFIRMED` (submit is synchronous; you'll rarely see `PENDING`/`FAILED`) |
+| Campaign | `Campaign.deployStatus` | `PENDING`…`WIRING` ("deploying") → `LIVE` (usable) / `FAILED` |
+| Campaign | `Campaign.status` | `PENDING_DEPLOYMENT` → `ACTIVE` (investable) → `LOCKED` / `GOAL_REACHED` / `COMPLETED` / `CANCELLED` |
+| Investment | `Investment.status` | `CONFIRMED` (submit is synchronous; you'll rarely see `PENDING` / `FAILED`) |
 | Distribution | `ProfitDistribution.status` | `PENDING` (building Merkle tree / posting on-chain — claims not ready) → `COMPLETED` (claimable) / `FAILED` |
 | Claim | `DistributionClaim.status` | `PENDING` (claimable, show button) → `CLAIMED` (done) |
 
 ## Error handling conventions
 
-- All errors are standard Nest HTTP exceptions with `{ statusCode, message, error }`
-  JSON bodies — `400` (validation/bad state), `401` (bad/missing/expired JWT
-  or wallet signature), `403` (role or KYC gate failed), `404` (not found /
-  not yours), `409` (conflicting state, e.g. campaign not investable, NIK
-  already used, claim already claimed).
-- `whitelist` (`ValidationPipe`) strips unknown body fields and coerces types
-  — don't rely on the backend rejecting extra fields, but do send correctly
-  typed values (numbers as numbers, money as strings).
-- For any `/prepare` → sign → `/submit` flow, a failure on submit (bad
-  signature, wrong contract/function/args, insufficient balance) is safe to
-  retry from `/prepare` again — nothing is persisted until submit succeeds.
+- **Standard Nest HTTP exceptions** with `{ statusCode, message, error }` bodies:
+  `400` (validation/bad state), `401` (bad/missing/expired JWT or wallet signature),
+  `403` (role or KYC gate failed), `404` (not found / not yours), `409` (conflicting
+  state — campaign not investable, NIK already used, claim already claimed).
+- **`ValidationPipe` `whitelist`** strips unknown body fields and coerces types —
+  don't rely on the backend rejecting extra fields, but do send correctly typed
+  values (numbers as numbers, money as strings).
+- **Any `/prepare` → sign → `/submit` failure is safe to retry from `/prepare`** —
+  nothing persists until submit succeeds.
