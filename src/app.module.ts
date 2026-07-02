@@ -17,6 +17,7 @@ import { InvestmentModule } from './investment/investment.module';
 import { IndexerModule } from './indexer/indexer.module';
 import { HoldingModule } from './holding/holding.module';
 import { DistributionModule } from './distribution/distribution.module';
+import { MilestoneModule } from './milestone/milestone.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { DistributionModule } from './distribution/distribution.module';
     IndexerModule,
     HoldingModule,
     DistributionModule,
+    MilestoneModule,
   ],
   controllers: [AppController],
   providers: [AppService],
