@@ -99,6 +99,25 @@ enum ClaimStatus {
   FAILED
 }
 
+// Milestone lifecycle: authored DRAFT (with the proposal) -> PENDING (campaign live) ->
+// VOTING (entrepreneur submitted for release) -> APPROVED/REJECTED (tally) -> RELEASING
+// -> RELEASED. FAILED on release error. Resume points derive from persisted tx hashes.
+enum MilestoneStatus {
+  DRAFT
+  PENDING
+  VOTING
+  APPROVED
+  RELEASING
+  RELEASED
+  REJECTED
+  FAILED
+}
+
+enum VoteChoice {
+  APPROVE
+  REJECT
+}
+
 // ---------- models ----------
 model User {
   id            String   @id @default(uuid()) @db.Uuid
@@ -115,6 +134,7 @@ model User {
   investments         Investment[]
   holdings            TokenHolding[]
   distributionClaims  DistributionClaim[]
+  milestoneVotes      MilestoneVote[]
   kycProfile          KycProfile?          @relation("UserKycProfile")
   kycReviews          KycProfile[]         @relation("AdminKycReviews")
 
@@ -170,6 +190,7 @@ model Proposal {
   entrepreneur User             @relation("EntrepreneurProposals", fields: [entrepreneurId], references: [id])
   reviews      ProposalReview[]
   campaign     Campaign?
+  milestones   Milestone[]
 
   @@index([status])
   @@index([entrepreneurId])
@@ -216,6 +237,7 @@ model Campaign {
   investments   Investment[]
   holdings      TokenHolding[]
   distributions ProfitDistribution[]
+  milestones    Milestone[]
 
   @@index([status])
   @@map("campaigns")
@@ -342,4 +364,58 @@ model DistributionClaim {
   @@unique([distributionId, investorId])
   @@index([investorId])
   @@map("distribution_claims")
+}
+
+model Milestone {
+  id           String          @id @default(uuid()) @db.Uuid
+  proposalId   String          @map("proposal_id") @db.Uuid
+  campaignId   String?         @map("campaign_id") @db.Uuid // set at proposal approval
+  order        Int // 1-based display order (author-defined)
+  onchainIndex Int             @map("onchain_index") // = order - 1; the contract's release_milestone(index)
+  title        String
+  description  String          @db.Text
+  amount       Decimal         @db.Decimal(28, 7) // absolute; sum per campaign == goal
+  status       MilestoneStatus @default(DRAFT)
+  proofKey     String?         @map("proof_key") // object key of the proof-of-progress upload (private bucket)
+
+  // Off-chain voting window — the ONLY time fields here. Everything else is
+  // event-triggered (entrepreneur submits when ready; no schedule).
+  votingStartedAt     DateTime? @map("voting_started_at") @db.Timestamptz
+  votingEndsAt        DateTime? @map("voting_ends_at") @db.Timestamptz
+  votingExtended      Boolean   @default(false) @map("voting_extended") // extended once if quorum missed
+  snapshotTotalSupply Decimal?  @map("snapshot_total_supply") @db.Decimal(28, 7) // quorum denominator, frozen at voting open
+
+  // On-chain release orchestrator (mirrors campaign deploy). tx_hash unique = idempotent.
+  releaseTxHash   String? @unique @map("release_tx_hash") @db.VarChar(64)
+  releaseError    String? @map("release_error") @db.Text
+  releaseAttempts Int     @default(0) @map("release_attempts")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  proposal Proposal        @relation(fields: [proposalId], references: [id])
+  campaign Campaign?       @relation(fields: [campaignId], references: [id])
+  votes    MilestoneVote[]
+
+  @@unique([proposalId, order])
+  @@index([campaignId, status])
+  @@map("milestones")
+}
+
+model MilestoneVote {
+  id          String     @id @default(uuid()) @db.Uuid
+  milestoneId String     @map("milestone_id") @db.Uuid
+  investorId  String     @map("investor_id") @db.Uuid
+  weight      Decimal    @db.Decimal(28, 7) // snapshotted TokenHolding.balance (= shares) at vote time
+  choice      VoteChoice
+  votedAt     DateTime   @default(now()) @map("voted_at") @db.Timestamptz
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  milestone Milestone @relation(fields: [milestoneId], references: [id])
+  investor  User      @relation(fields: [investorId], references: [id])
+
+  @@unique([milestoneId, investorId])
+  @@index([investorId])
+  @@map("milestone_votes")
 }
