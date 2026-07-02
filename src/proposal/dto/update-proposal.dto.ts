@@ -1,4 +1,7 @@
+import { Type } from 'class-transformer';
 import {
+  ArrayMinSize,
+  IsArray,
   IsInt,
   IsOptional,
   IsString,
@@ -6,7 +9,9 @@ import {
   Matches,
   Max,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { CreateMilestoneDto } from './create-proposal.dto';
 
 /**
  * Partial edit of a DRAFT proposal — every field optional. Defined manually
@@ -45,4 +50,12 @@ export class UpdateProposalDto {
   @Min(1)
   @Max(3650)
   lockPeriodDays?: number;
+
+  /** Replaces the whole milestone set when provided (DRAFT only). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateMilestoneDto)
+  milestones?: CreateMilestoneDto[];
 }

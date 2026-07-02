@@ -32,6 +32,20 @@ const dto: CreateProposalDto = {
   location: 'Yogyakarta',
   requestedAmount: '10000.0000000',
   lockPeriodDays: 180,
+  milestones: [
+    {
+      order: 1,
+      title: 'Sewa & renovasi',
+      description: 'Sewa + renovasi gerai',
+      amount: '6000',
+    },
+    {
+      order: 2,
+      title: 'Peralatan & stok',
+      description: 'Mesin kopi + bahan baku',
+      amount: '4000',
+    },
+  ],
 };
 
 describe('ProposalService', () => {
@@ -63,6 +77,59 @@ describe('ProposalService', () => {
   it('rejects a zero requestedAmount on create (no write)', async () => {
     await expect(
       service.create('u1', { ...dto, requestedAmount: '0' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.proposal.create).not.toHaveBeenCalled();
+  });
+
+  it('nests milestone rows with onchainIndex = order - 1 on create', async () => {
+    prisma.proposal.create.mockResolvedValue({ id: 'p1', status: 'DRAFT' });
+
+    await service.create('u1', dto);
+
+    expect(prisma.proposal.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          milestones: {
+            create: expect.arrayContaining([
+              expect.objectContaining({
+                order: 1,
+                onchainIndex: 0,
+                amount: '6000',
+              }),
+              expect.objectContaining({
+                order: 2,
+                onchainIndex: 1,
+                amount: '4000',
+              }),
+            ]) as unknown,
+          },
+        }) as unknown,
+      }),
+    );
+  });
+
+  it('rejects milestones that do not sum to requestedAmount (no write)', async () => {
+    await expect(
+      service.create('u1', {
+        ...dto,
+        milestones: [
+          { order: 1, title: 'a', description: 'a', amount: '6000' },
+          { order: 2, title: 'b', description: 'b', amount: '3000' }, // sums to 9000 ≠ 10000
+        ],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.proposal.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-contiguous milestone orders (no write)', async () => {
+    await expect(
+      service.create('u1', {
+        ...dto,
+        milestones: [
+          { order: 1, title: 'a', description: 'a', amount: '6000' },
+          { order: 3, title: 'b', description: 'b', amount: '4000' }, // gap at 2
+        ],
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.proposal.create).not.toHaveBeenCalled();
   });
