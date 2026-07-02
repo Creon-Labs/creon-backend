@@ -760,6 +760,37 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "Milestones"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "i128": "600000"
+                          },
+                          {
+                            "i128": "400000"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "NextMilestone"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "Owner"
                           }
                         ]

@@ -79,7 +79,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
                 },
                 {
-                  "i128": "500"
+                  "i128": "1000000"
                 }
               ]
             }
@@ -101,7 +101,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
                 },
                 {
-                  "i128": "500"
+                  "i128": "1000000"
                 }
               ]
             }
@@ -120,7 +120,7 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                     },
                     {
-                      "i128": "500"
+                      "i128": "1000000"
                     }
                   ]
                 }
@@ -328,13 +328,13 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "500"
+                "i128": "1000000"
               }
             }
           },
           "ext": "v0"
         },
-        "live_until": 518400
+        "live_until": 4095
       },
       {
         "entry": {
@@ -445,7 +445,7 @@
                         ]
                       },
                       "val": {
-                        "i128": "500"
+                        "i128": "1000000"
                       }
                     }
                   ]
@@ -560,7 +560,7 @@
                         ]
                       },
                       "val": {
-                        "i128": "500"
+                        "i128": "1000000"
                       }
                     },
                     {
@@ -665,7 +665,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "500"
+                      "i128": "1000000"
                     }
                   },
                   {

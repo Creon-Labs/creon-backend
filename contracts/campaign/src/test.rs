@@ -62,6 +62,7 @@ fn setup() -> F {
             business.clone(),
             GOAL,
             LOCK_PERIOD,
+            Vec::from_array(&e, [600_000i128, 400_000i128]), // milestones, sum == GOAL
         ),
     );
     let campaign = CampaignClient::new(&e, &camp_id);
@@ -116,19 +117,103 @@ fn invest_non_whitelisted_reverts() {
     assert_eq!(f.campaign.raised(), 0);
 }
 
+/// Fund the campaign to its goal with one whitelisted investor, so milestone
+/// releases (gated on `raised >= goal`, all-or-nothing) are unlocked.
+fn fund_to_goal(f: &F) -> Address {
+    let alice = Address::generate(&f.e);
+    f.registry.add(&alice);
+    f.usdc_admin.mint(&alice, &GOAL);
+    f.campaign.invest(&alice, &GOAL);
+    alice
+}
+
 #[test]
-fn release_to_business_moves_principal() {
+fn release_milestone_sequential_pays() {
+    let f = setup();
+    fund_to_goal(&f);
+
+    // Milestone 0 → 600_000, then milestone 1 → 400_000 (sum == GOAL).
+    f.campaign.release_milestone(&0u32);
+    assert_eq!(f.usdc.balance(&f.business), 600_000);
+    assert_eq!(f.campaign.released(), 600_000);
+    assert_eq!(f.campaign.next_milestone(), 1);
+
+    f.campaign.release_milestone(&1u32);
+    assert_eq!(f.usdc.balance(&f.business), GOAL);
+    assert_eq!(f.usdc.balance(&f.camp_id), 0);
+    assert_eq!(f.campaign.released(), GOAL);
+    assert_eq!(f.campaign.next_milestone(), 2);
+}
+
+#[test]
+fn release_out_of_order_reverts() {
+    let f = setup();
+    fund_to_goal(&f);
+
+    // Cannot skip milestone 0.
+    assert!(f.campaign.try_release_milestone(&1u32).is_err());
+    assert_eq!(f.campaign.released(), 0);
+    assert_eq!(f.campaign.next_milestone(), 0);
+}
+
+#[test]
+fn release_before_funding_goal_reverts() {
     let f = setup();
     let alice = Address::generate(&f.e);
     f.registry.add(&alice);
     f.usdc_admin.mint(&alice, &500);
-    f.campaign.invest(&alice, &500);
+    f.campaign.invest(&alice, &500); // raised 500 < GOAL
 
-    f.campaign.release_to_business();
+    assert!(f.campaign.try_release_milestone(&0u32).is_err());
+    assert_eq!(f.campaign.released(), 0);
+}
 
-    assert_eq!(f.usdc.balance(&f.business), 500);
-    assert_eq!(f.usdc.balance(&f.camp_id), 0);
-    assert_eq!(f.campaign.released(), 500);
+#[test]
+fn double_release_reverts() {
+    let f = setup();
+    fund_to_goal(&f);
+
+    f.campaign.release_milestone(&0u32);
+    // Re-releasing index 0 now fails (next is 1): the sequential counter is also the
+    // once-only gate.
+    assert!(f.campaign.try_release_milestone(&0u32).is_err());
+    assert_eq!(f.campaign.next_milestone(), 1);
+}
+
+#[test]
+#[should_panic]
+fn constructor_milestone_sum_mismatch_reverts() {
+    let e = Env::default();
+    e.mock_all_auths();
+    let owner = Address::generate(&e);
+    let business = Address::generate(&e);
+    let reg_id = e.register(ComplianceRegistry, (owner.clone(),));
+    let sac = e.register_stellar_asset_contract_v2(owner.clone());
+    let usdc_addr = sac.address();
+    let token_id = e.register(
+        ShareToken,
+        (
+            owner.clone(),
+            reg_id.clone(),
+            String::from_str(&e, "Creon Share"),
+            String::from_str(&e, "CRS"),
+        ),
+    );
+
+    // Milestones sum to 900_000 != GOAL (1_000_000) → constructor must reject.
+    e.register(
+        Campaign,
+        (
+            owner,
+            token_id,
+            reg_id,
+            usdc_addr,
+            business,
+            GOAL,
+            LOCK_PERIOD,
+            Vec::from_array(&e, [600_000i128, 300_000i128]),
+        ),
+    );
 }
 
 #[test]

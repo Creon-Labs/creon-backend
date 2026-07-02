@@ -46,6 +46,9 @@ pub enum CampaignError {
     AlreadyClaimed = 5,
     InvalidProof = 6,
     NothingToRelease = 7,
+    MilestoneSumMismatch = 8,
+    FundingIncomplete = 9,
+    MilestoneOutOfOrder = 10,
 }
 
 #[contracttype]
@@ -58,6 +61,8 @@ enum DataKey {
     LockPeriod,
     Raised,
     Released,
+    Milestones,        // Vec<i128> of per-milestone amounts (sum == goal at construction)
+    NextMilestone,     // u32 index of the next releasable milestone (sequential gate)
     Root(u32),         // merkle root per distribution id
     Claimed(u32, u32), // (distribution id, leaf index) -> claimed
 }
@@ -93,6 +98,12 @@ struct Claimed {
     amount: i128,
 }
 
+#[contractevent(topics = ["campaign", "milestone"])]
+struct MilestoneReleased {
+    index: u32,
+    amount: i128,
+}
+
 #[contract]
 pub struct Campaign;
 
@@ -110,8 +121,20 @@ impl Campaign {
         business: Address,
         goal: i128,
         lock_period: u64,
+        milestone_amounts: Vec<i128>,
     ) {
         set_owner(e, &owner);
+
+        // Milestone amounts are pinned on-chain (the "hybrid" guarantee): they must
+        // sum exactly to the goal, so releases can never exceed the raised principal.
+        let mut sum: i128 = 0;
+        for a in milestone_amounts.iter() {
+            sum += a;
+        }
+        if sum != goal {
+            panic_with_error!(e, CampaignError::MilestoneSumMismatch);
+        }
+
         let s = e.storage().instance();
         s.set(&DataKey::Token, &token);
         s.set(&DataKey::Registry, &registry);
@@ -121,6 +144,8 @@ impl Campaign {
         s.set(&DataKey::LockPeriod, &lock_period);
         s.set(&DataKey::Raised, &0i128);
         s.set(&DataKey::Released, &0i128);
+        s.set(&DataKey::Milestones, &milestone_amounts);
+        s.set(&DataKey::NextMilestone, &0u32);
     }
 
     /// Invest `amount` USDC. The investor must be whitelisted. Pulls USDC into
@@ -143,22 +168,39 @@ impl Campaign {
         Invested { investor, amount }.publish(e);
     }
 
-    /// Release all not-yet-released custodied principal to the business. Owner-only.
+    /// Release milestone `index`'s scheduled amount to the business. Owner-only.
+    /// Requires the campaign to be fully funded (`raised >= goal`, all-or-nothing) and
+    /// enforces sequential, once-only release via the `NextMilestone` counter — so the
+    /// platform can only ever hand over the pinned milestone chunks, in order.
     #[only_owner]
-    pub fn release_to_business(e: &Env) {
-        let to_release = Self::raised(e) - Self::released(e);
-        if to_release <= 0 {
+    pub fn release_milestone(e: &Env, index: u32) {
+        if Self::raised(e) < Self::goal(e) {
+            panic_with_error!(e, CampaignError::FundingIncomplete);
+        }
+        let next = Self::next_milestone(e);
+        if index != next {
+            panic_with_error!(e, CampaignError::MilestoneOutOfOrder);
+        }
+        let amount = match Self::milestones(e).get(index) {
+            Some(a) => a,
+            None => panic_with_error!(e, CampaignError::MilestoneOutOfOrder),
+        };
+        // Defense in depth: never move more than the custodied principal (mirrors the
+        // old lump-sum guard). Given sum(milestones) == goal <= raised, this always holds.
+        if amount > Self::raised(e) - Self::released(e) {
             panic_with_error!(e, CampaignError::NothingToRelease);
         }
+
         let usdc = token::TokenClient::new(e, &Self::usdc(e));
-        usdc.transfer(
-            &e.current_contract_address(),
-            &Self::business(e),
-            &to_release,
-        );
+        usdc.transfer(&e.current_contract_address(), &Self::business(e), &amount);
+
         e.storage()
             .instance()
-            .set(&DataKey::Released, &(Self::released(e) + to_release));
+            .set(&DataKey::Released, &(Self::released(e) + amount));
+        e.storage()
+            .instance()
+            .set(&DataKey::NextMilestone, &(next + 1));
+        MilestoneReleased { index, amount }.publish(e);
     }
 
     /// Unlock share transfers (after the lock period). Owner-only.
@@ -263,6 +305,15 @@ impl Campaign {
     }
     pub fn business(e: &Env) -> Address {
         e.storage().instance().get(&DataKey::Business).unwrap()
+    }
+    pub fn milestones(e: &Env) -> Vec<i128> {
+        e.storage().instance().get(&DataKey::Milestones).unwrap()
+    }
+    pub fn next_milestone(e: &Env) -> u32 {
+        e.storage()
+            .instance()
+            .get(&DataKey::NextMilestone)
+            .unwrap_or(0)
     }
 
     fn require_whitelisted(e: &Env, addr: &Address) {

@@ -79,7 +79,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
                 },
                 {
-                  "i128": "500"
+                  "i128": "1000000"
                 }
               ]
             }
@@ -101,7 +101,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
                 },
                 {
-                  "i128": "500"
+                  "i128": "1000000"
                 }
               ]
             }
@@ -120,7 +120,7 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                     },
                     {
-                      "i128": "500"
+                      "i128": "1000000"
                     }
                   ]
                 }
@@ -138,14 +138,41 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
-              "function_name": "release_to_business",
-              "args": []
+              "function_name": "release_milestone",
+              "args": [
+                {
+                  "u32": 0
+                }
+              ]
             }
           },
           "sub_invocations": []
         }
       ]
     ],
+    [],
+    [],
+    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+              "function_name": "release_milestone",
+              "args": [
+                {
+                  "u32": 1
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [],
     [],
     [],
     []
@@ -287,6 +314,26 @@
           "data": {
             "contract_data": {
               "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "8370022561469687789"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
               "key": {
                 "vec": [
@@ -363,7 +410,7 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "500"
+                "i128": "1000000"
               }
             }
           },
@@ -480,7 +527,7 @@
                         ]
                       },
                       "val": {
-                        "i128": "500"
+                        "i128": "1000000"
                       }
                     }
                   ]
@@ -547,6 +594,37 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "Milestones"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "i128": "600000"
+                          },
+                          {
+                            "i128": "400000"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "NextMilestone"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 2
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "Owner"
                           }
                         ]
@@ -564,7 +642,7 @@
                         ]
                       },
                       "val": {
-                        "i128": "500"
+                        "i128": "1000000"
                       }
                     },
                     {
@@ -588,7 +666,7 @@
                         ]
                       },
                       "val": {
-                        "i128": "500"
+                        "i128": "1000000"
                       }
                     },
                     {
@@ -669,7 +747,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "500"
+                      "i128": "1000000"
                     }
                   },
                   {
