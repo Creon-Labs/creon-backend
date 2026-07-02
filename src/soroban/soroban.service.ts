@@ -297,6 +297,10 @@ export class SorobanService {
   bytesVecArg(values: Buffer[]): xdr.ScVal {
     return xdr.ScVal.scvVec(values.map((v) => xdr.ScVal.scvBytes(v)));
   }
+  /** Soroban `Vec<i128>` — the per-milestone release amounts pinned at deploy. */
+  i128VecArg(values: bigint[]): xdr.ScVal {
+    return xdr.ScVal.scvVec(values.map((v) => this.i128Arg(v)));
+  }
 
   // ---- ScVal readers (inverse of the builders above) ----
   /** Read an ScVal `Address` back to its `G...`/`C...` string form. */

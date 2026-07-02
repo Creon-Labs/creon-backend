@@ -33,6 +33,7 @@ function makeDeps() {
     addressArg: jest.fn((x: string) => ({ address: x })),
     stringArg: jest.fn((x: string) => ({ string: x })),
     i128Arg: jest.fn((x: bigint) => ({ i128: x })),
+    i128VecArg: jest.fn((xs: bigint[]) => ({ i128vec: xs })),
     u64Arg: jest.fn((x: bigint) => ({ u64: x })),
     saltFor: jest.fn((s: string) => Buffer.from(s)),
     deployFromWasmHash: jest.fn(),
@@ -67,6 +68,10 @@ function makeCampaign(overrides: Record<string, unknown> = {}) {
       lockPeriodDays: 30,
       entrepreneur: { walletAddress: 'GBUSINESS' },
     },
+    milestones: [
+      { amount: new Prisma.Decimal('600'), onchainIndex: 0 },
+      { amount: new Prisma.Decimal('400'), onchainIndex: 1 },
+    ],
     ...overrides,
   };
 }
@@ -148,6 +153,11 @@ describe('CampaignDeployService.drive', () => {
 
     expect(soroban.i128Arg).toHaveBeenCalledWith(10_000_000_000n); // 1000 * 1e7
     expect(soroban.u64Arg).toHaveBeenCalledWith(BigInt(30 * 86_400));
+    // milestone_amounts Vec in stroops: 600 & 400 * 1e7, in onchainIndex order.
+    expect(soroban.i128VecArg).toHaveBeenCalledWith([
+      6_000_000_000n,
+      4_000_000_000n,
+    ]);
   });
 
   it('resumes from a deployed token: deploys only the campaign, no token redeploy', async () => {

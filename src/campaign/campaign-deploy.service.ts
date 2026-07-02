@@ -178,6 +178,9 @@ export class CampaignDeployService implements OnApplicationBootstrap {
         this.soroban.addressArg(campaign.proposal.entrepreneur.walletAddress), // business
         this.soroban.i128Arg(toStroops(campaign.goalAmount)), // goal
         this.soroban.u64Arg(lockPeriod), // lock_period
+        this.soroban.i128VecArg(
+          campaign.milestones.map((m) => toStroops(m.amount)),
+        ), // milestone_amounts (order == onchainIndex)
       ],
       this.soroban.saltFor(`${campaign.id}:campaign`),
     );
@@ -248,6 +251,10 @@ export class CampaignDeployService implements OnApplicationBootstrap {
         proposal: {
           include: { entrepreneur: { select: { walletAddress: true } } },
         },
+        milestones: {
+          select: { amount: true, onchainIndex: true },
+          orderBy: { onchainIndex: 'asc' },
+        },
       },
     });
     if (!campaign || !campaign.projectToken) {
@@ -272,4 +279,5 @@ interface LoadedCampaign {
     lockPeriodDays: number;
     entrepreneur: { walletAddress: string };
   };
+  milestones: { amount: Prisma.Decimal; onchainIndex: number }[];
 }

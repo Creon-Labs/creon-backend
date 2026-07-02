@@ -3,6 +3,7 @@ import { Prisma } from '../../generated/prisma/client';
 import {
   CampaignDeployStatus,
   CampaignStatus,
+  MilestoneStatus,
   VaultStatus,
 } from '../../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -43,14 +44,14 @@ export class CampaignService {
    * Runs inside the approval transaction; the unique `proposalId` makes a second
    * call throw P2002, so approval can't double-create.
    */
-  createForProposal(
+  async createForProposal(
     tx: Prisma.TransactionClient,
     proposal: ProposalForCampaign,
   ): Promise<{ id: string }> {
     const lockEndAt = new Date(
       Date.now() + proposal.lockPeriodDays * SECONDS_PER_DAY * 1000,
     );
-    return tx.campaign.create({
+    const campaign = await tx.campaign.create({
       data: {
         proposalId: proposal.id,
         goalAmount: proposal.requestedAmount,
@@ -69,6 +70,14 @@ export class CampaignService {
       },
       select: { id: true },
     });
+    // Link the proposal's authored milestones to the campaign and move them out of
+    // DRAFT. Their amounts are pinned on-chain by CampaignDeployService (the deploy
+    // reads campaign.milestones to build the constructor's Vec<i128>).
+    await tx.milestone.updateMany({
+      where: { proposalId: proposal.id },
+      data: { campaignId: campaign.id, status: MilestoneStatus.PENDING },
+    });
+    return campaign;
   }
 
   /** List campaigns whose contracts are live (open for browsing/investment). */

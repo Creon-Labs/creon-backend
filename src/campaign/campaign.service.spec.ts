@@ -3,6 +3,7 @@ import { Prisma } from '../../generated/prisma/client';
 import {
   CampaignDeployStatus,
   CampaignStatus,
+  MilestoneStatus,
   VaultStatus,
 } from '../../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,10 +11,17 @@ import { CampaignService } from './campaign.service';
 
 describe('CampaignService', () => {
   const create = jest.fn().mockResolvedValue({ id: 'camp-1' });
-  const tx = { campaign: { create } } as unknown as Prisma.TransactionClient;
+  const updateMany = jest.fn().mockResolvedValue({ count: 2 });
+  const tx = {
+    campaign: { create },
+    milestone: { updateMany },
+  } as unknown as Prisma.TransactionClient;
   const service = new CampaignService({} as PrismaService);
 
-  beforeEach(() => create.mockClear());
+  beforeEach(() => {
+    create.mockClear();
+    updateMany.mockClear();
+  });
 
   const proposal = {
     id: 'prop-1',
@@ -57,6 +65,14 @@ describe('CampaignService', () => {
     expect(arg.data.lockEndAt.getTime()).toBeGreaterThanOrEqual(
       expected - 5000,
     );
+  });
+
+  it('links the proposal milestones to the new campaign (PENDING)', async () => {
+    await service.createForProposal(tx, proposal);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { proposalId: 'prop-1' },
+      data: { campaignId: 'camp-1', status: MilestoneStatus.PENDING },
+    });
   });
 });
 
