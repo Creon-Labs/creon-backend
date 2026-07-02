@@ -5,7 +5,7 @@
 > and [PROJECT.md](./PROJECT.md) (narrative). This document is the **build order**;
 > keep it checked off as work lands.
 >
-> Last updated: 2026-07-01.
+> Last updated: 2026-07-02.
 
 ## Design summary (the decisions this plan implements)
 
@@ -16,7 +16,7 @@ These consolidate and, where noted, **refine** ARCHITECTURE.md:
    |---|---|---|
    | `ComplianceRegistry` | **singleton** (1 per platform) | KYC whitelist: `add` / `remove` / `is_whitelisted`. Deployed once at platform setup. |
    | `ShareToken` (restricted SEP-41) | per-campaign | Share token; `mint` **and** `transfer` gated by the registry + lock flag. |
-   | `Campaign` | per-campaign | **Merged vault + lifecycle + distribution**: `invest()`, USDC custody, lock/release, `deposit_profit`, `set_distribution(merkle_root)`, `claim(amount, proof)`. |
+   | `Campaign` | per-campaign | **Merged vault + lifecycle + distribution**: `invest()`, USDC custody, lock/release, staged `release_milestone(index)`, `deposit_profit`, `set_distribution(merkle_root)`, `claim(amount, proof)`. |
 
    > Refines ARCHITECTURE.md decisions #3/#7/#12: vault and distribution are **folded
    > into `Campaign`** to cut per-campaign deploys from 4 to **2 instances**. Split out
@@ -51,6 +51,16 @@ These consolidate and, where noted, **refine** ARCHITECTURE.md:
    on-chain; investors `claim(amount, proof)` and the contract verifies the proof, so
    the backend cannot forge amounts.
 
+6. **Fund release — milestone-based staged release, hybrid on-/off-chain (added
+   2026-07-02, see Phase 7).** Lump-sum `release_to_business` is replaced by
+   `release_milestone(index)`: per-milestone amounts are **pinned on-chain**
+   (`Vec<i128>` at deploy, summing to the goal) and released sequentially, once
+   each, only once the campaign is **fully funded**. *Which* milestone releases and
+   *when* is decided by **fully off-chain** investor voting (Postgres) weighted by
+   share balance — quorum (of snapshotted total supply) + majority of cast weight,
+   with a missed-quorum window extended once and then defaulted to approved so a
+   passive electorate can't stall a legitimate business.
+
 ---
 
 ## Phase 1 — Core smart contracts (Rust / Soroban)
@@ -72,6 +82,9 @@ uploaded (instantiated per-campaign in Phase 2).
       `invest(investor, amount)` (whitelist-gated → pull USDC into custody → mint shares 1:1);
       `release_to_business`/`unlock`; `deposit_profit(from, amount)`; `set_distribution(id, merkle_root)`;
       `claim(id, index, claimant, amount, proof)` with on-chain commutative SHA-256 Merkle verification.
+      **Superseded in Phase 7:** the constructor gained a trailing `milestone_amounts:
+      Vec<i128>` param and `release_to_business` was replaced by staged
+      `release_milestone(index)`.
 - [x] Unit tests per contract (Soroban test env, 13 passing): whitelist gating at mint **and**
       transfer, lock behavior, invest happy-path + non-whitelisted revert, claim proof
       verify/forge-reject + double-claim.
@@ -288,9 +301,80 @@ deposit). _(Implemented + unit-tested; on-chain e2e pending a funded
 
 ---
 
+## Phase 7 — Milestone-based staged fund release (hybrid)
+
+**Goal:** replace lump-sum `release_to_business` with per-milestone staged release,
+gated by off-chain investor voting weighted by share balance.
+
+**Design notes (decided during build, 2026-07-02)**
+- **Hybrid split**: milestone amounts are pinned **on-chain** (`Vec<i128>` at
+  constructor, must sum to the goal); voting itself is **fully off-chain**
+  (Postgres) — the contract doesn't know about votes, only enforces
+  sequential/once-only release (a `NextMilestone` counter) and a full-funding gate.
+- **All-or-nothing funding**: `release_milestone` reverts unless `raised >= goal`.
+- **Quorum + majority**: participation quorum is measured against a snapshot of
+  total supply (Σ `TokenHolding.balance` at the moment voting opens — **not**
+  `ProjectToken.totalSupply`, which is never populated) plus a strict majority of
+  cast weight. Both thresholds are configurable via env.
+- **Quorum-miss handling**: extend the voting window once; if still unmet,
+  default-approve (a passive electorate can't deadlock a legitimate business).
+- **No dates in milestone authoring** — release is event-triggered (the
+  entrepreneur clicks submit), not scheduled.
+- A **fourth BullMQ orchestrator** (`milestone-release`), same idempotent
+  `drive()`/reconcile shape as `campaign-deploy`/`kyc-whitelist`/`distribution`; the
+  contract's `NextMilestone` counter makes a duplicate `release_milestone` call
+  revert with `MilestoneOutOfOrder`, which the orchestrator treats as "already
+  released" to finalize idempotently.
+
+**Deliverables**
+- [x] Contract: constructor gains `milestone_amounts: Vec<i128>` (validated
+      `sum == goal`); `release_to_business` replaced by `release_milestone(index)`
+      (owner-gated, sequential via the `NextMilestone` counter, gated on
+      `raised >= goal`); new errors `MilestoneSumMismatch`/`FundingIncomplete`/
+      `MilestoneOutOfOrder`; event `MilestoneReleased`. Tests: sequential release,
+      out-of-order revert, pre-funding revert, double-release revert, constructor
+      sum-mismatch revert (`contracts/campaign/src/lib.rs`, `test.rs`).
+- [x] Schema: `Milestone` + `MilestoneVote` models, `MilestoneStatus`/`VoteChoice`
+      enums (migration `20260702080530_add_milestones`).
+- [x] Proposal authoring: nested `milestones` array on create/update proposal DTOs;
+      the service validates contiguous `order` + Σ`amount` == `requestedAmount`
+      (stroop-exact); milestones are linked to the campaign at approval.
+- [x] Deploy: `CampaignDeployService` passes the milestone amounts `Vec`
+      (`i128VecArg`, a new `SorobanService` helper) as the constructor's last arg.
+- [x] Voting module (`src/milestone/`): entrepreneur `submitForRelease` (ownership +
+      full-funding + sequential gate + proof upload + supply snapshot), investor
+      `vote` (weight = `TokenHolding.balance`, upsert), `settleExpired` reconcile
+      (`@Interval` + boot) tallying quorum/majority, extend-once-then-default-approve.
+- [x] Release orchestrator (4th BullMQ queue `milestone-release`): mirrors
+      `campaign-deploy`; drives `APPROVED → RELEASING → RELEASED`, bumps
+      `CampaignVault.releasedToBusiness`.
+- [x] Config: `MILESTONE_VOTING_WINDOW_SECONDS` (7d), `MILESTONE_QUORUM_BPS` (30%),
+      `MILESTONE_APPROVAL_BPS` (>50%).
+- [x] Tests: contract (11 total, all green), backend unit (`milestone.util`,
+      `milestone-release.service`, `milestone-voting.service`, plus
+      `proposal`/`campaign`/`campaign-deploy` extensions) — 199 backend tests green.
+
+**Acceptance:** a campaign funded to goal, with a milestone submitted and approved
+by investor vote (or defaulted after a missed-quorum extension), has its
+`release_milestone(index)` tx succeed and `CampaignVault.releasedToBusiness`
+increase by that milestone's amount; a second submit for the same index is rejected
+until the next milestone is reached. _(Implemented + unit-tested; on-chain e2e
+pending the same funded `STELLAR_PLATFORM_SECRET` caveat as Phases 2–6, **plus** a
+WASM rebuild + redeploy since the constructor signature changed — see below.)_
+
+**Outstanding before e2e**: the constructor signature changed (new
+`milestone_amounts` param), so the WASM must be rebuilt (`stellar contract build`)
+and redeployed, and `CAMPAIGN_WASM_HASH` + `contracts/deployments/testnet.json`
+updated. Deploy is per-campaign, so campaigns already live on testnet keep working
+under the old WASM — only new deploys pick up the milestone feature.
+
+**Depends on:** Phases 1–4 (a funded, live campaign to attach milestones to).
+
+---
+
 ## Build order rationale
 
 Riskiest / most foundational first: **Phase 1 proves KYC gating on-chain**, and
 **Phases 1–4 are enough for a demo** ("approve → campaign live → whitelisted investor
 invests, non-KYC rejected on-chain"). Phases 5–6 complete the dividend (bagi hasil)
-story.
+story; Phase 7 replaces lump-sum disbursement with milestone-gated staged release.

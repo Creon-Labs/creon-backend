@@ -66,6 +66,19 @@ tags:
       claim, a BullMQ orchestrator builds the tree and posts the root
       (`set_distribution`); the distribution is claimable once it is `COMPLETED`.
       Unclaimed dividends remain claimable indefinitely (no on-chain reclaim).
+  - name: milestones
+    description: |
+      Milestone-based staged fund release (hybrid on-/off-chain). Entrepreneurs
+      define milestones (order, title, description, amount — no dates) up front on
+      the proposal; the amounts are pinned on-chain at deploy and must sum to the
+      requested amount. Once a campaign is fully funded, the entrepreneur submits a
+      milestone with a proof-of-progress file, which opens a weighted vote among the
+      campaign's investors (weight = share balance). When the voting window closes,
+      a reconcile loop tallies quorum (of a supply snapshot taken when voting
+      opened) and majority of cast weight: approved → the on-chain
+      `release_milestone(index)` is enqueued automatically; a missed quorum extends
+      the window once and then defaults to approved. No route triggers the on-chain
+      release directly — it always runs through the orchestrator once a vote settles.
 
 components:
   securitySchemes:
@@ -133,6 +146,23 @@ components:
         - `PENDING` – entitlement computed; not yet claimed on-chain
         - `CLAIMED` – the `claim()` tx succeeded and USDC was paid to the holder
         - `FAILED` – the claim did not complete
+
+    MilestoneStatus:
+      type: string
+      enum: [DRAFT, PENDING, VOTING, APPROVED, RELEASING, RELEASED, REJECTED, FAILED]
+      description: |
+        - `DRAFT` – authored on a proposal that is still a draft
+        - `PENDING` – proposal approved and the milestone linked to a campaign; not yet submitted for release
+        - `VOTING` – the entrepreneur submitted it; the voting window is open
+        - `APPROVED` – voting passed (or defaulted after a missed-quorum extension); the on-chain release is enqueued
+        - `RELEASING` – the on-chain `release_milestone()` tx is in flight
+        - `RELEASED` – funds transferred to the business wallet
+        - `REJECTED` – voting closed with quorum met but majority against
+        - `FAILED` – the release orchestrator errored (retried with backoff)
+
+    VoteChoice:
+      type: string
+      enum: [APPROVE, REJECT]
 
     # ── Request bodies ─────────────────────────────────────────────────────────
     ChallengeRequest:
@@ -208,6 +238,42 @@ components:
           description: Why the previously-approved KYC is being revoked (expiry/sanction)
           example: Wallet flagged on sanctions screening.
 
+    CreateMilestoneRequest:
+      type: object
+      description: |
+        One milestone in the proposal's release schedule. No dates — release is
+        event-driven (the entrepreneur submits a milestone for a vote when ready),
+        not calendar-based.
+      required: [order, title, description, amount]
+      properties:
+        order:
+          type: integer
+          minimum: 1
+          description: |
+            1-based position in the release schedule. Across a proposal's
+            milestones, orders must be contiguous starting at 1 (validated
+            server-side). `onchainIndex` (order − 1) is derived automatically.
+          example: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: Sewa & renovasi
+        description:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          example: Sewa tempat + renovasi gerai pertama.
+        amount:
+          type: string
+          pattern: '^\d+(\.\d{1,7})?$'
+          description: |
+            This milestone's release amount as a decimal string (up to 7
+            decimals, must be > 0). Across a proposal's milestones, amounts must
+            sum **exactly** to `requestedAmount` — this sum is pinned on-chain at
+            campaign deploy.
+          example: "6000.0000000"
+
     CreateProposalRequest:
       type: object
       required:
@@ -216,6 +282,7 @@ components:
         - category
         - requestedAmount
         - lockPeriodDays
+        - milestones
       properties:
         businessName:
           type: string
@@ -248,6 +315,23 @@ components:
           maximum: 3650
           description: Capital lock period in days
           example: 180
+        milestones:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CreateMilestoneRequest'
+          description: |
+            The staged release schedule. Amounts must sum exactly to
+            `requestedAmount`; orders must be contiguous starting at 1.
+          example:
+            - order: 1
+              title: Sewa & renovasi
+              description: Sewa tempat + renovasi gerai pertama.
+              amount: "6000.0000000"
+            - order: 2
+              title: Peralatan & stok
+              description: Mesin kopi + bahan baku awal.
+              amount: "4000.0000000"
 
     UpdateProposalRequest:
       type: object
@@ -282,6 +366,16 @@ components:
           minimum: 1
           maximum: 3650
           example: 180
+        milestones:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CreateMilestoneRequest'
+          description: |
+            When provided, **replaces the whole milestone set** (a DRAFT proposal
+            has no votes yet, so this is safe). Amounts must sum exactly to the
+            effective `requestedAmount` (the new value if also provided in this
+            request, otherwise the proposal's current value).
 
     PrepareInvestmentRequest:
       type: object
@@ -558,6 +652,7 @@ components:
         - status
         - createdAt
         - updatedAt
+        - milestones
       properties:
         id:
           type: string
@@ -593,6 +688,11 @@ components:
         updatedAt:
           type: string
           format: date-time
+        milestones:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProposalMilestone'
+          description: The proposal's staged release schedule, ordered.
 
     Campaign:
       type: object
@@ -873,6 +973,181 @@ components:
               format: uuid
             status:
               $ref: '#/components/schemas/DistributionStatus'
+
+    ProposalMilestone:
+      type: object
+      description: A milestone as authored on / returned with a proposal (owner-only view).
+      required: [id, order, onchainIndex, title, description, amount, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        order:
+          type: integer
+          example: 1
+        onchainIndex:
+          type: integer
+          description: order − 1; the index the contract's Vec<i128> constructor arg is keyed on
+          example: 0
+        title:
+          type: string
+          example: Sewa & renovasi
+        description:
+          type: string
+          example: Sewa tempat + renovasi gerai pertama.
+        amount:
+          type: string
+          description: This milestone's release amount as a decimal string (7 decimals)
+          example: "6000.0000000"
+        status:
+          $ref: '#/components/schemas/MilestoneStatus'
+        proofKey:
+          type: [string, 'null']
+          description: Object storage key of the uploaded proof-of-progress file (raw key, not a URL); set once submitted for voting
+        votingStartedAt:
+          type: [string, 'null']
+          format: date-time
+        votingEndsAt:
+          type: [string, 'null']
+          format: date-time
+        votingExtended:
+          type: boolean
+          description: True once the once-only quorum-miss extension has been used
+        snapshotTotalSupply:
+          type: [string, 'null']
+          description: Total supply snapshot (Σ TokenHolding.balance) frozen when voting opened — the quorum denominator
+        releaseTxHash:
+          type: [string, 'null']
+          minLength: 64
+          maxLength: 64
+          description: Hex-encoded Stellar tx hash of the on-chain release_milestone(), once released
+
+    Milestone:
+      type: object
+      description: A campaign's milestone as returned by the milestones voting endpoints.
+      required: [id, campaignId, order, onchainIndex, title, description, amount, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        campaignId:
+          type: string
+          format: uuid
+        order:
+          type: integer
+          example: 1
+        onchainIndex:
+          type: integer
+          description: order − 1; the index the contract's Vec<i128> constructor arg is keyed on
+          example: 0
+        title:
+          type: string
+          example: Sewa & renovasi
+        description:
+          type: string
+          example: Sewa tempat + renovasi gerai pertama.
+        amount:
+          type: string
+          description: This milestone's release amount as a decimal string (7 decimals)
+          example: "6000.0000000"
+        status:
+          $ref: '#/components/schemas/MilestoneStatus'
+        votingStartedAt:
+          type: [string, 'null']
+          format: date-time
+        votingEndsAt:
+          type: [string, 'null']
+          format: date-time
+        votingExtended:
+          type: boolean
+          description: True once the once-only quorum-miss extension has been used
+        releaseTxHash:
+          type: [string, 'null']
+          minLength: 64
+          maxLength: 64
+          description: Hex-encoded Stellar tx hash of the on-chain release_milestone(), once released
+
+    MilestoneTally:
+      type: object
+      description: Running (or final) tally of a milestone's vote, in whole-USDC-equivalent share units.
+      required: [participation, approve, reject, totalSupply, quorumMet, approvalMet, quorumBps, approvalBps]
+      properties:
+        participation:
+          type: string
+          description: Total voting weight (shares) cast so far, as a decimal string
+          example: "700.0000000"
+        approve:
+          type: string
+          example: "600.0000000"
+        reject:
+          type: string
+          example: "100.0000000"
+        totalSupply:
+          type: [string, 'null']
+          description: Snapshotted total supply (the quorum denominator)
+          example: "1000.0000000"
+        quorumMet:
+          type: boolean
+        approvalMet:
+          type: boolean
+        quorumBps:
+          type: integer
+          description: Required participation, in basis points of total supply (MILESTONE_QUORUM_BPS)
+          example: 3000
+        approvalBps:
+          type: integer
+          description: Required approval share of cast weight, in basis points (MILESTONE_APPROVAL_BPS)
+          example: 5000
+
+    MilestoneDetail:
+      description: A milestone with its running vote tally and the caller's own ballot.
+      allOf:
+        - $ref: '#/components/schemas/Milestone'
+        - type: object
+          required: [tally, myVote]
+          properties:
+            snapshotTotalSupply:
+              type: [string, 'null']
+              description: Total supply snapshot frozen when voting opened
+            proofUrl:
+              type: [string, 'null']
+              format: uri
+              description: Presigned URL (5-minute TTL) for the proof-of-progress file; null before submission
+            tally:
+              $ref: '#/components/schemas/MilestoneTally'
+            myVote:
+              type: [object, 'null']
+              description: The caller's own ballot, or null if they haven't voted.
+              properties:
+                choice:
+                  $ref: '#/components/schemas/VoteChoice'
+                weight:
+                  type: string
+                  example: "500.0000000"
+                votedAt:
+                  type: string
+                  format: date-time
+
+    CastVoteRequest:
+      type: object
+      required: [choice]
+      properties:
+        choice:
+          $ref: '#/components/schemas/VoteChoice'
+
+    MilestoneVoteResponse:
+      type: object
+      required: [milestoneId, choice, weight]
+      properties:
+        milestoneId:
+          type: string
+          format: uuid
+        choice:
+          $ref: '#/components/schemas/VoteChoice'
+        weight:
+          type: string
+          description: The voter's current share balance, as a decimal string (7 decimals)
+          example: "500.0000000"
 
     ErrorResponse:
       type: object
@@ -2109,6 +2384,189 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: Distribution not ready, or entitlement already claimed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /milestones:
+    get:
+      tags: [milestones]
+      summary: List a campaign's milestones
+      description: |
+        Returns a campaign's milestones, ordered — for the investor voting UI.
+        Any authenticated user may read.
+      operationId: milestoneList
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: campaignId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the campaign
+      responses:
+        '200':
+          description: The campaign's milestones
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Milestone'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /milestones/{milestoneId}:
+    get:
+      tags: [milestones]
+      summary: Get milestone detail
+      description: |
+        Returns one milestone with its running vote tally (participation, approve/
+        reject weight, quorum/approval status), a presigned URL for the
+        proof-of-progress file (if submitted), and the caller's own ballot, if any.
+        Any authenticated user may read.
+      operationId: milestoneGet
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: milestoneId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the milestone
+      responses:
+        '200':
+          description: Milestone detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MilestoneDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /milestones/{milestoneId}/submit:
+    post:
+      tags: [milestones]
+      summary: Submit a milestone for release (opens voting)
+      description: |
+        The entrepreneur submits a `PENDING` milestone for release, attaching a
+        proof-of-progress file (JPEG, PNG, or PDF, ≤ 5 MB). Requires ownership of
+        the parent proposal, the `ENTREPRENEUR` role, and an `APPROVED` KYC
+        profile. Gated: the campaign must be **fully funded** (`raisedAmount >=
+        goalAmount`) and every lower-order milestone must already be `RELEASED`
+        (sequential release). On success the total supply is snapshotted (the
+        quorum denominator) and the milestone transitions `PENDING` → `VOTING`
+        with a `MILESTONE_VOTING_WINDOW_SECONDS`-long window (default 7 days).
+      operationId: milestoneSubmit
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: milestoneId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the milestone
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [proof]
+              properties:
+                proof:
+                  type: string
+                  format: binary
+                  description: Proof-of-progress file (JPEG, PNG, or PDF, max 5 MB)
+      responses:
+        '201':
+          description: Milestone submitted (status VOTING)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Milestone'
+        '400':
+          description: Missing proof file, or wrong file type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Milestone not found, or not owned by the caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: |
+            Milestone is not `PENDING` (already submitted/released), the campaign
+            has not reached its funding goal, a previous milestone has not been
+            released yet, or the campaign is not live.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /milestones/{milestoneId}/vote:
+    post:
+      tags: [milestones]
+      summary: Cast or change a vote on a milestone
+      description: |
+        Investor casts (or updates) a ballot on a `VOTING` milestone, weighted by
+        the caller's current share balance in the campaign. Idempotent per
+        (milestone, investor) — voting again before the deadline replaces the
+        previous choice and refreshes the weight. Requires the `INVESTOR` role and
+        an `APPROVED` KYC profile.
+      operationId: milestoneVote
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: milestoneId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the milestone
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CastVoteRequest'
+      responses:
+        '200':
+          description: Ballot recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MilestoneVoteResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: |
+            Insufficient role/KYC, or the caller holds no shares in this campaign
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Voting is not open for this milestone (not VOTING, or the window has closed)
           content:
             application/json:
               schema:
