@@ -3,7 +3,9 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
 // Allow BigInt values (e.g. Prisma ledger-sequence fields) to be JSON-serialized.
-(BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function () {
+(BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function (
+  this: bigint,
+) {
   return this.toString();
 };
 
@@ -12,4 +14,4 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.listen(process.env.PORT ?? 3000);
 }
-bootstrap();
+void bootstrap();
