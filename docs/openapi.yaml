@@ -104,7 +104,7 @@ components:
     # ── Enums ──────────────────────────────────────────────────────────────────
     KycStatus:
       type: string
-      enum: [PENDING, APPROVED, REJECTED, REVOKED]
+      enum: [ PENDING, APPROVED, REJECTED, REVOKED ]
       description: |
         - `PENDING` – awaiting admin review
         - `APPROVED` – identity verified; the wallet is enqueued for the on-chain whitelist (`registry.add`)
@@ -113,11 +113,11 @@ components:
 
     Role:
       type: string
-      enum: [ENTREPRENEUR, INVESTOR, ADMIN]
+      enum: [ ENTREPRENEUR, INVESTOR, ADMIN ]
 
     ProposalStatus:
       type: string
-      enum: [DRAFT, SUBMITTED, UNDER_REVIEW, APPROVED, REJECTED]
+      enum: [ DRAFT, SUBMITTED, UNDER_REVIEW, APPROVED, REJECTED ]
       description: |
         - `DRAFT` – created, editable, not yet submitted
         - `SUBMITTED` – submitted, awaiting admin review
@@ -127,7 +127,7 @@ components:
 
     CampaignStatus:
       type: string
-      enum: [PENDING_DEPLOYMENT, ACTIVE, LOCKED, GOAL_REACHED, COMPLETED, CANCELLED]
+      enum: [ PENDING_DEPLOYMENT, ACTIVE, LOCKED, GOAL_REACHED, COMPLETED, CANCELLED ]
       description: |
         - `PENDING_DEPLOYMENT` – campaign mirror created; on-chain contracts not yet live
         - `ACTIVE` – contracts live and open for investment (funding)
@@ -138,7 +138,7 @@ components:
 
     InvestmentStatus:
       type: string
-      enum: [PENDING, CONFIRMED, FAILED]
+      enum: [ PENDING, CONFIRMED, FAILED ]
       description: |
         - `PENDING` – recorded but not yet confirmed on-chain
         - `CONFIRMED` – the `invest()` tx succeeded on-chain and shares were minted
@@ -146,7 +146,7 @@ components:
 
     DistributionStatus:
       type: string
-      enum: [PENDING, COMPLETED, FAILED]
+      enum: [ PENDING, COMPLETED, FAILED ]
       description: |
         - `PENDING` – deposit recorded; snapshot + Merkle root not yet posted
         - `COMPLETED` – tree built, claims persisted, and `set_distribution` posted on-chain (claimable)
@@ -154,7 +154,7 @@ components:
 
     ClaimStatus:
       type: string
-      enum: [PENDING, CLAIMED, FAILED]
+      enum: [ PENDING, CLAIMED, FAILED ]
       description: |
         - `PENDING` – entitlement computed; not yet claimed on-chain
         - `CLAIMED` – the `claim()` tx succeeded and USDC was paid to the holder
@@ -162,7 +162,7 @@ components:
 
     RefundStatus:
       type: string
-      enum: [PENDING, COMPLETED, FAILED]
+      enum: [ PENDING, COMPLETED, FAILED ]
       description: |
         - `PENDING` – campaign cancelled; the on-chain `cancel()` + snapshot + `set_refund` steps are not yet complete
         - `COMPLETED` – contract frozen, remaining custody snapshotted, claims persisted, and `set_refund` posted on-chain (claimable)
@@ -170,7 +170,7 @@ components:
 
     RefundClaimStatus:
       type: string
-      enum: [PENDING, CLAIMED, FAILED]
+      enum: [ PENDING, CLAIMED, FAILED ]
       description: |
         - `PENDING` – entitlement computed; not yet claimed on-chain
         - `CLAIMED` – the `refund_claim()` tx succeeded and the principal was returned to the holder
@@ -178,7 +178,17 @@ components:
 
     MilestoneStatus:
       type: string
-      enum: [DRAFT, PENDING, VOTING, APPROVED, RELEASING, RELEASED, REJECTED, FAILED]
+      enum:
+        [
+          DRAFT,
+          PENDING,
+          VOTING,
+          APPROVED,
+          RELEASING,
+          RELEASED,
+          REJECTED,
+          FAILED
+        ]
       description: |
         - `DRAFT` – authored on a proposal that is still a draft
         - `PENDING` – proposal approved and the milestone linked to a campaign; not yet submitted for release
@@ -191,12 +201,12 @@ components:
 
     VoteChoice:
       type: string
-      enum: [APPROVE, REJECT]
+      enum: [ APPROVE, REJECT ]
 
     # ── Request bodies ─────────────────────────────────────────────────────────
     ChallengeRequest:
       type: object
-      required: [walletAddress]
+      required: [ walletAddress ]
       properties:
         walletAddress:
           type: string
@@ -207,7 +217,7 @@ components:
 
     RegisterRequest:
       type: object
-      required: [walletAddress, signature, role]
+      required: [ walletAddress, signature, role ]
       properties:
         walletAddress:
           type: string
@@ -220,7 +230,7 @@ components:
           description: Base64-encoded Ed25519 signature over the challenge message
         role:
           type: string
-          enum: [ENTREPRENEUR, INVESTOR]
+          enum: [ ENTREPRENEUR, INVESTOR ]
           description: Self-assignable role for the new account
         email:
           type: string
@@ -234,7 +244,7 @@ components:
 
     LoginRequest:
       type: object
-      required: [walletAddress, signature]
+      required: [ walletAddress, signature ]
       properties:
         walletAddress:
           type: string
@@ -247,7 +257,7 @@ components:
 
     RejectRequest:
       type: object
-      required: [reason]
+      required: [ reason ]
       properties:
         reason:
           type: string
@@ -258,7 +268,7 @@ components:
 
     RevokeRequest:
       type: object
-      required: [reason]
+      required: [ reason ]
       properties:
         reason:
           type: string
@@ -273,7 +283,7 @@ components:
         One milestone in the proposal's release schedule. No dates — release is
         event-driven (the entrepreneur submits a milestone for a vote when ready),
         not calendar-based.
-      required: [order, title, description, amount]
+      required: [ order, title, description, amount ]
       properties:
         order:
           type: integer
@@ -336,7 +346,8 @@ components:
         requestedAmount:
           type: string
           pattern: '^\d+(\.\d{1,7})?$'
-          description: Requested funding amount as a decimal string (up to 7 decimals, must be > 0)
+          description: Requested funding amount as a decimal string (up to 7 decimals,
+            must be > 0)
           example: "10000.0000000"
         lockPeriodDays:
           type: integer
@@ -388,7 +399,8 @@ components:
         requestedAmount:
           type: string
           pattern: '^\d+(\.\d{1,7})?$'
-          description: Requested funding amount as a decimal string (up to 7 decimals, must be > 0)
+          description: Requested funding amount as a decimal string (up to 7 decimals,
+            must be > 0)
           example: "12500.0000000"
         lockPeriodDays:
           type: integer
@@ -408,17 +420,18 @@ components:
 
     PrepareInvestmentRequest:
       type: object
-      required: [amount]
+      required: [ amount ]
       properties:
         amount:
           type: string
           pattern: '^\d+(\.\d{1,7})?$'
-          description: USDC amount to invest as a decimal string (up to 7 decimals, must be > 0)
+          description: USDC amount to invest as a decimal string (up to 7 decimals, must
+            be > 0)
           example: "500.0000000"
 
     SubmitInvestmentRequest:
       type: object
-      required: [signedXdr]
+      required: [ signedXdr ]
       properties:
         signedXdr:
           type: string
@@ -429,17 +442,18 @@ components:
 
     DepositProfitRequest:
       type: object
-      required: [amount]
+      required: [ amount ]
       properties:
         amount:
           type: string
           pattern: '^\d+(\.\d{1,7})?$'
-          description: USDC profit to deposit as a decimal string (up to 7 decimals, must be > 0)
+          description: USDC profit to deposit as a decimal string (up to 7 decimals, must
+            be > 0)
           example: "1000.0000000"
 
     SubmitSignedTxRequest:
       type: object
-      required: [signedXdr]
+      required: [ signedXdr ]
       properties:
         signedXdr:
           type: string
@@ -450,18 +464,19 @@ components:
 
     CancelCampaignRequest:
       type: object
-      required: [reason]
+      required: [ reason ]
       properties:
         reason:
           type: string
           minLength: 1
           maxLength: 500
-          description: Why the campaign is being cancelled — surfaced to investors alongside the refund
+          description: Why the campaign is being cancelled — surfaced to investors
+            alongside the refund
           example: Bisnis gagal memenuhi milestone; dana dikembalikan ke investor.
 
     SubmitRefundClaimRequest:
       type: object
-      required: [signedXdr]
+      required: [ signedXdr ]
       properties:
         signedXdr:
           type: string
@@ -473,7 +488,7 @@ components:
     # ── Responses ──────────────────────────────────────────────────────────────
     ChallengeResponse:
       type: object
-      required: [message]
+      required: [ message ]
       properties:
         message:
           type: string
@@ -482,7 +497,7 @@ components:
 
     TokenResponse:
       type: object
-      required: [accessToken]
+      required: [ accessToken ]
       properties:
         accessToken:
           type: string
@@ -490,7 +505,7 @@ components:
 
     KycSubmitResponse:
       type: object
-      required: [status, submittedAt]
+      required: [ status, submittedAt ]
       properties:
         status:
           $ref: '#/components/schemas/KycStatus'
@@ -500,7 +515,7 @@ components:
 
     KycProfile:
       type: object
-      required: [status, fullName, nationalId, submittedAt]
+      required: [ status, fullName, nationalId, submittedAt ]
       properties:
         status:
           $ref: '#/components/schemas/KycStatus'
@@ -515,10 +530,10 @@ components:
           type: string
           format: date-time
         reviewedAt:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         rejectionReason:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           example: Foto selfie tidak jelas.
 
     AdminKycItem:
@@ -560,40 +575,40 @@ components:
           type: string
           format: date-time
         rejectionReason:
-          type: [string, 'null']
+          type: [ string, 'null' ]
         idCardUrl:
           type: string
           format: uri
           description: Presigned URL (5-minute TTL) for the KTP/ID card image
         selfieUrl:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: uri
           description: Presigned URL (5-minute TTL) for the selfie image
 
     AdminApproveResponse:
       type: object
-      required: [userId, status, reviewedAt]
+      required: [ userId, status, reviewedAt ]
       properties:
         userId:
           type: string
           format: uuid
         status:
           type: string
-          enum: [APPROVED]
+          enum: [ APPROVED ]
         reviewedAt:
           type: string
           format: date-time
 
     AdminRejectResponse:
       type: object
-      required: [userId, status, reviewedAt, rejectionReason]
+      required: [ userId, status, reviewedAt, rejectionReason ]
       properties:
         userId:
           type: string
           format: uuid
         status:
           type: string
-          enum: [REJECTED]
+          enum: [ REJECTED ]
         reviewedAt:
           type: string
           format: date-time
@@ -602,14 +617,14 @@ components:
 
     AdminRevokeResponse:
       type: object
-      required: [userId, status, reviewedAt, rejectionReason]
+      required: [ userId, status, reviewedAt, rejectionReason ]
       properties:
         userId:
           type: string
           format: uuid
         status:
           type: string
-          enum: [REVOKED]
+          enum: [ REVOKED ]
         reviewedAt:
           type: string
           format: date-time
@@ -637,7 +652,7 @@ components:
           type: string
           example: Kuliner
         location:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           example: Yogyakarta
         requestedAmount:
           type: string
@@ -649,30 +664,30 @@ components:
         status:
           $ref: '#/components/schemas/ProposalStatus'
         submittedAt:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         entrepreneur:
           type: object
-          required: [walletAddress]
+          required: [ walletAddress ]
           properties:
             walletAddress:
               type: string
               minLength: 56
               maxLength: 56
             email:
-              type: [string, 'null']
+              type: [ string, 'null' ]
               format: email
 
     AdminApproveProposalResponse:
       type: object
-      required: [proposalId, status, campaignId]
+      required: [ proposalId, status, campaignId ]
       properties:
         proposalId:
           type: string
           format: uuid
         status:
           type: string
-          enum: [APPROVED]
+          enum: [ APPROVED ]
         campaignId:
           type: string
           format: uuid
@@ -682,14 +697,14 @@ components:
 
     AdminRejectProposalResponse:
       type: object
-      required: [proposalId, status]
+      required: [ proposalId, status ]
       properties:
         proposalId:
           type: string
           format: uuid
         status:
           type: string
-          enum: [REJECTED]
+          enum: [ REJECTED ]
 
     AdminCancelCampaignResponse:
       type: object
@@ -699,7 +714,7 @@ components:
         (`set_refund`) all run asynchronously in the background — poll
         `GET /campaigns/{campaignId}/refund` for progress. Idempotent: re-cancelling
         returns the existing refund.
-      required: [id, campaignId, status, createdAt]
+      required: [ id, campaignId, status, createdAt ]
       properties:
         id:
           type: string
@@ -708,7 +723,7 @@ components:
           type: string
           format: uuid
         reason:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           example: Bisnis gagal memenuhi milestone; dana dikembalikan ke investor.
         status:
           $ref: '#/components/schemas/RefundStatus'
@@ -743,7 +758,7 @@ components:
           type: string
           example: Kuliner
         location:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           example: Yogyakarta
         requestedAmount:
           type: string
@@ -755,9 +770,10 @@ components:
         status:
           $ref: '#/components/schemas/ProposalStatus'
         submittedAt:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
-          description: Set when the proposal is submitted (DRAFT → SUBMITTED); null while still a draft
+          description: Set when the proposal is submitted (DRAFT → SUBMITTED); null while
+            still a draft
         createdAt:
           type: string
           format: date-time
@@ -773,13 +789,13 @@ components:
     Campaign:
       type: object
       description: Public campaign view (list + detail).
-      required: [id, goalAmount, raisedAmount, status]
+      required: [ id, goalAmount, raisedAmount, status ]
       properties:
         id:
           type: string
           format: uuid
         contractAddress:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           minLength: 56
           maxLength: 56
           description: Soroban Campaign contract address (C…); null until the deploy is live
@@ -794,16 +810,16 @@ components:
         status:
           $ref: '#/components/schemas/CampaignStatus'
         lockEndAt:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         startAt:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         endAt:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         projectToken:
-          type: [object, 'null']
+          type: [ object, 'null' ]
           description: The campaign's restricted SEP-41 share token.
           properties:
             assetCode:
@@ -811,14 +827,14 @@ components:
               maxLength: 12
               example: WARUNGBU1234
             contractAddress:
-              type: [string, 'null']
+              type: [ string, 'null' ]
               minLength: 56
               maxLength: 56
               description: ShareToken contract address (C…); null until deployed
 
     PrepareInvestmentResponse:
       type: object
-      required: [campaignId, xdr]
+      required: [ campaignId, xdr ]
       properties:
         campaignId:
           type: string
@@ -832,7 +848,7 @@ components:
 
     Investment:
       type: object
-      required: [id, campaignId, amount, status, createdAt]
+      required: [ id, campaignId, amount, status, createdAt ]
       properties:
         id:
           type: string
@@ -845,18 +861,19 @@ components:
           description: Invested USDC amount as a decimal string (7 decimals)
           example: "500.0000000"
         lpTokens:
-          type: [string, 'null']
-          description: Shares received (minted 1:1 with the USDC invested), as a decimal string
+          type: [ string, 'null' ]
+          description: Shares received (minted 1:1 with the USDC invested), as a decimal
+            string
           example: "500.0000000"
         txHash:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           minLength: 64
           maxLength: 64
           description: Hex-encoded Stellar transaction hash of the on-chain `invest()`
         status:
           $ref: '#/components/schemas/InvestmentStatus'
         investedAt:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         createdAt:
           type: string
@@ -865,7 +882,7 @@ components:
     Holding:
       type: object
       description: One of the caller's own current share holdings (own data, unmasked).
-      required: [campaignId, balance, updatedLedger]
+      required: [ campaignId, balance, updatedLedger ]
       properties:
         campaignId:
           type: string
@@ -886,7 +903,7 @@ components:
             status:
               $ref: '#/components/schemas/CampaignStatus'
             projectToken:
-              type: [object, 'null']
+              type: [ object, 'null' ]
               properties:
                 assetCode:
                   type: string
@@ -899,17 +916,18 @@ components:
         One row of a campaign's public cap table. Holder identity is **masked**: the
         wallet address is truncated and any display name is reduced to initials. Legal
         KYC names are never exposed here.
-      required: [holder, address, balance, updatedLedger]
+      required: [ holder, address, balance, updatedLedger ]
       properties:
         holder:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           description: |
             The holder's masked display name (e.g. `B*** S***`), or `null` for an
             unregistered on-chain address / a holder with no display name.
           example: B*** S***
         address:
           type: string
-          description: Masked wallet address — first 4 and last 4 characters (e.g. `GCUQ…OCBY`)
+          description: Masked wallet address — first 4 and last 4 characters (e.g.
+            `GCUQ…OCBY`)
           example: GCUQ…OCBY
         balance:
           type: string
@@ -923,7 +941,7 @@ components:
 
     PrepareDepositResponse:
       type: object
-      required: [campaignId, xdr]
+      required: [ campaignId, xdr ]
       properties:
         campaignId:
           type: string
@@ -937,7 +955,7 @@ components:
 
     PrepareClaimResponse:
       type: object
-      required: [distributionId, xdr]
+      required: [ distributionId, xdr ]
       properties:
         distributionId:
           type: string
@@ -951,7 +969,16 @@ components:
 
     ProfitDistribution:
       type: object
-      required: [id, campaignId, onchainId, totalAmount, totalClaimed, status, createdAt]
+      required:
+        [
+          id,
+          campaignId,
+          onchainId,
+          totalAmount,
+          totalClaimed,
+          status,
+          createdAt
+        ]
       properties:
         id:
           type: string
@@ -961,29 +988,34 @@ components:
           format: uuid
         onchainId:
           type: integer
-          description: The contract's per-campaign distribution id (`u32`), used by `set_distribution`/`claim`.
+          description: The contract's per-campaign distribution id (`u32`), used by
+            `set_distribution`/`claim`.
           example: 0
         totalAmount:
           type: string
-          description: Profit (USDC) deposited for this distribution, as a decimal string (7 decimals)
+          description: Profit (USDC) deposited for this distribution, as a decimal string
+            (7 decimals)
           example: "1000.0000000"
         totalShares:
-          type: [string, 'null']
-          description: Total snapshotted shares across eligible holders (null until snapshotted)
+          type: [ string, 'null' ]
+          description: Total snapshotted shares across eligible holders (null until
+            snapshotted)
           example: "1000.0000000"
         rewardPerShare:
-          type: [string, 'null']
-          description: Dividend per share (`totalAmount / totalShares`), as a decimal string (null until snapshotted)
+          type: [ string, 'null' ]
+          description: Dividend per share (`totalAmount / totalShares`), as a decimal
+            string (null until snapshotted)
           example: "1.000000000000000000"
         totalClaimed:
           type: string
           description: USDC claimed so far, as a decimal string (7 decimals)
           example: "600.0000000"
         merkleRoot:
-          type: [string, 'null']
-          description: Hex-encoded Merkle root posted on-chain (null until the tree is built)
+          type: [ string, 'null' ]
+          description: Hex-encoded Merkle root posted on-chain (null until the tree is
+            built)
         snapshotLedger:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
           format: int64
           description: Stellar ledger sequence the profit was deposited at
           example: 1234567
@@ -998,8 +1030,18 @@ components:
 
     DistributionClaim:
       type: object
-      description: The caller's own entitlement for one distribution, including the Merkle proof.
-      required: [id, distributionId, shareAmount, amount, merkleProof, status, createdAt]
+      description: The caller's own entitlement for one distribution, including the
+        Merkle proof.
+      required:
+        [
+          id,
+          distributionId,
+          shareAmount,
+          amount,
+          merkleProof,
+          status,
+          createdAt
+        ]
       properties:
         id:
           type: string
@@ -1009,14 +1051,16 @@ components:
           format: uuid
         shareAmount:
           type: string
-          description: The holder's snapshotted share balance, as a decimal string (7 decimals)
+          description: The holder's snapshotted share balance, as a decimal string (7
+            decimals)
           example: "600.0000000"
         amount:
           type: string
-          description: The holder's pro-rata USDC entitlement, as a decimal string (7 decimals)
+          description: The holder's pro-rata USDC entitlement, as a decimal string (7
+            decimals)
           example: "600.0000000"
         leafIndex:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
           description: The leaf index in the Merkle tree (also the on-chain `claim()` index)
           example: 0
         merkleProof:
@@ -1025,14 +1069,14 @@ components:
             type: string
           description: Hex-encoded sibling hashes proving the leaf against the posted root
         claimTxHash:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           minLength: 64
           maxLength: 64
           description: Hex-encoded Stellar transaction hash of the on-chain `claim()`
         status:
           $ref: '#/components/schemas/ClaimStatus'
         claimedAt:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         createdAt:
           type: string
@@ -1056,7 +1100,7 @@ components:
         A campaign's refund (at most one per campaign), opened when an admin cancels
         it. Returned by the per-campaign refund read; `null` if the campaign has not
         been cancelled.
-      required: [id, campaignId, totalAmount, totalClaimed, status, createdAt]
+      required: [ id, campaignId, totalAmount, totalClaimed, status, createdAt ]
       properties:
         id:
           type: string
@@ -1065,7 +1109,7 @@ components:
           type: string
           format: uuid
         reason:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           description: Why the campaign was cancelled (shown to investors)
           example: Bisnis gagal memenuhi milestone; dana dikembalikan ke investor.
         totalAmount:
@@ -1075,18 +1119,20 @@ components:
             a decimal string (7 decimals). 0 until the orchestrator snapshots the pot.
           example: "1000.0000000"
         totalShares:
-          type: [string, 'null']
-          description: Total snapshotted shares across eligible holders (null until snapshotted)
+          type: [ string, 'null' ]
+          description: Total snapshotted shares across eligible holders (null until
+            snapshotted)
           example: "1000.0000000"
         totalClaimed:
           type: string
           description: Principal claimed so far, as a decimal string (7 decimals)
           example: "600.0000000"
         merkleRoot:
-          type: [string, 'null']
-          description: Hex-encoded refund Merkle root posted on-chain (null until the tree is built)
+          type: [ string, 'null' ]
+          description: Hex-encoded refund Merkle root posted on-chain (null until the tree
+            is built)
         snapshotLedger:
-          type: [integer, 'null']
+          type: [ integer, 'null' ]
           format: int64
           description: Stellar ledger sequence the holdings snapshot was taken at
           example: 1234567
@@ -1098,8 +1144,9 @@ components:
 
     RefundClaim:
       type: object
-      description: The caller's own refund entitlement for one cancelled campaign, including the Merkle proof.
-      required: [id, refundId, shareAmount, amount, merkleProof, status, createdAt]
+      description: The caller's own refund entitlement for one cancelled campaign,
+        including the Merkle proof.
+      required: [ id, refundId, shareAmount, amount, merkleProof, status, createdAt ]
       properties:
         id:
           type: string
@@ -1109,15 +1156,18 @@ components:
           format: uuid
         shareAmount:
           type: string
-          description: The holder's snapshotted share balance, as a decimal string (7 decimals)
+          description: The holder's snapshotted share balance, as a decimal string (7
+            decimals)
           example: "600.0000000"
         amount:
           type: string
-          description: The holder's pro-rata principal entitlement, as a decimal string (7 decimals)
+          description: The holder's pro-rata principal entitlement, as a decimal string (7
+            decimals)
           example: "600.0000000"
         leafIndex:
-          type: [integer, 'null']
-          description: The leaf index in the Merkle tree (also the on-chain `refund_claim()` index)
+          type: [ integer, 'null' ]
+          description: The leaf index in the Merkle tree (also the on-chain
+            `refund_claim()` index)
           example: 0
         merkleProof:
           type: array
@@ -1125,14 +1175,14 @@ components:
             type: string
           description: Hex-encoded sibling hashes proving the leaf against the posted root
         claimTxHash:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           minLength: 64
           maxLength: 64
           description: Hex-encoded Stellar transaction hash of the on-chain `refund_claim()`
         status:
           $ref: '#/components/schemas/RefundClaimStatus'
         claimedAt:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         createdAt:
           type: string
@@ -1149,7 +1199,7 @@ components:
 
     PrepareRefundClaimResponse:
       type: object
-      required: [refundId, xdr]
+      required: [ refundId, xdr ]
       properties:
         refundId:
           type: string
@@ -1164,7 +1214,7 @@ components:
     ProposalMilestone:
       type: object
       description: A milestone as authored on / returned with a proposal (owner-only view).
-      required: [id, order, onchainIndex, title, description, amount, status]
+      required: [ id, order, onchainIndex, title, description, amount, status ]
       properties:
         id:
           type: string
@@ -1174,7 +1224,8 @@ components:
           example: 1
         onchainIndex:
           type: integer
-          description: order − 1; the index the contract's Vec<i128> constructor arg is keyed on
+          description: order − 1; the index the contract's Vec<i128> constructor arg is
+            keyed on
           example: 0
         title:
           type: string
@@ -1189,30 +1240,43 @@ components:
         status:
           $ref: '#/components/schemas/MilestoneStatus'
         proofKey:
-          type: [string, 'null']
-          description: Object storage key of the uploaded proof-of-progress file (raw key, not a URL); set once submitted for voting
+          type: [ string, 'null' ]
+          description: Object storage key of the uploaded proof-of-progress file (raw key,
+            not a URL); set once submitted for voting
         votingStartedAt:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         votingEndsAt:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         votingExtended:
           type: boolean
           description: True once the once-only quorum-miss extension has been used
         snapshotTotalSupply:
-          type: [string, 'null']
-          description: Total supply snapshot (Σ TokenHolding.balance) frozen when voting opened — the quorum denominator
+          type: [ string, 'null' ]
+          description: Total supply snapshot (Σ TokenHolding.balance) frozen when voting
+            opened — the quorum denominator
         releaseTxHash:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           minLength: 64
           maxLength: 64
-          description: Hex-encoded Stellar tx hash of the on-chain release_milestone(), once released
+          description: Hex-encoded Stellar tx hash of the on-chain release_milestone(),
+            once released
 
     Milestone:
       type: object
       description: A campaign's milestone as returned by the milestones voting endpoints.
-      required: [id, campaignId, order, onchainIndex, title, description, amount, status]
+      required:
+        [
+          id,
+          campaignId,
+          order,
+          onchainIndex,
+          title,
+          description,
+          amount,
+          status
+        ]
       properties:
         id:
           type: string
@@ -1225,7 +1289,8 @@ components:
           example: 1
         onchainIndex:
           type: integer
-          description: order − 1; the index the contract's Vec<i128> constructor arg is keyed on
+          description: order − 1; the index the contract's Vec<i128> constructor arg is
+            keyed on
           example: 0
         title:
           type: string
@@ -1240,24 +1305,36 @@ components:
         status:
           $ref: '#/components/schemas/MilestoneStatus'
         votingStartedAt:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         votingEndsAt:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           format: date-time
         votingExtended:
           type: boolean
           description: True once the once-only quorum-miss extension has been used
         releaseTxHash:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           minLength: 64
           maxLength: 64
-          description: Hex-encoded Stellar tx hash of the on-chain release_milestone(), once released
+          description: Hex-encoded Stellar tx hash of the on-chain release_milestone(),
+            once released
 
     MilestoneTally:
       type: object
-      description: Running (or final) tally of a milestone's vote, in whole-USDC-equivalent share units.
-      required: [participation, approve, reject, totalSupply, quorumMet, approvalMet, quorumBps, approvalBps]
+      description: Running (or final) tally of a milestone's vote, in
+        whole-USDC-equivalent share units.
+      required:
+        [
+          participation,
+          approve,
+          reject,
+          totalSupply,
+          quorumMet,
+          approvalMet,
+          quorumBps,
+          approvalBps
+        ]
       properties:
         participation:
           type: string
@@ -1270,7 +1347,7 @@ components:
           type: string
           example: "100.0000000"
         totalSupply:
-          type: [string, 'null']
+          type: [ string, 'null' ]
           description: Snapshotted total supply (the quorum denominator)
           example: "1000.0000000"
         quorumMet:
@@ -1279,11 +1356,13 @@ components:
           type: boolean
         quorumBps:
           type: integer
-          description: Required participation, in basis points of total supply (MILESTONE_QUORUM_BPS)
+          description: Required participation, in basis points of total supply
+            (MILESTONE_QUORUM_BPS)
           example: 3000
         approvalBps:
           type: integer
-          description: Required approval share of cast weight, in basis points (MILESTONE_APPROVAL_BPS)
+          description: Required approval share of cast weight, in basis points
+            (MILESTONE_APPROVAL_BPS)
           example: 5000
 
     MilestoneDetail:
@@ -1291,19 +1370,20 @@ components:
       allOf:
         - $ref: '#/components/schemas/Milestone'
         - type: object
-          required: [tally, myVote]
+          required: [ tally, myVote ]
           properties:
             snapshotTotalSupply:
-              type: [string, 'null']
+              type: [ string, 'null' ]
               description: Total supply snapshot frozen when voting opened
             proofUrl:
-              type: [string, 'null']
+              type: [ string, 'null' ]
               format: uri
-              description: Presigned URL (5-minute TTL) for the proof-of-progress file; null before submission
+              description: Presigned URL (5-minute TTL) for the proof-of-progress file; null
+                before submission
             tally:
               $ref: '#/components/schemas/MilestoneTally'
             myVote:
-              type: [object, 'null']
+              type: [ object, 'null' ]
               description: The caller's own ballot, or null if they haven't voted.
               properties:
                 choice:
@@ -1317,14 +1397,14 @@ components:
 
     CastVoteRequest:
       type: object
-      required: [choice]
+      required: [ choice ]
       properties:
         choice:
           $ref: '#/components/schemas/VoteChoice'
 
     MilestoneVoteResponse:
       type: object
-      required: [milestoneId, choice, weight]
+      required: [ milestoneId, choice, weight ]
       properties:
         milestoneId:
           type: string
@@ -1338,7 +1418,7 @@ components:
 
     ErrorResponse:
       type: object
-      required: [statusCode, message]
+      required: [ statusCode, message ]
       properties:
         statusCode:
           type: integer
@@ -1385,17 +1465,21 @@ components:
             statusCode: 404
             message: Not Found
 
-
 # ── Paths ──────────────────────────────────────────────────────────────────────
 paths:
   /auth/challenge:
     post:
-      tags: [auth]
-      summary: Request a challenge message
+      tags: [ auth ]
+      summary: Dapatkan Pesan Challenge (Nonce)
       description: |
-        Returns a single-use nonce message that the client must sign with their
-        Stellar secret key. The challenge expires after 300 seconds and is deleted
-        after a successful login or registration (no replay).
+        Mengembalikan pesan nonce sekali pakai untuk ditandatangani oleh secret key Stellar user.
+
+        **Untuk Frontend:**
+        1. Panggil endpoint ini untuk mendapatkan pesan text.
+        2. Minta user (lewat wallet/Freighter) untuk menandatangani pesan tersebut.
+        3. Kirim hasil tanda tangan ke `/auth/login` atau `/auth/register`.
+
+        *Catatan: Challenge ini akan kedaluwarsa dalam 5 menit.*
       operationId: authChallenge
       security: []
       requestBody:
@@ -1420,14 +1504,16 @@ paths:
 
   /auth/register:
     post:
-      tags: [auth]
-      summary: Register a new user
+      tags: [ auth ]
+      summary: Registrasi User Baru
       description: |
-        Creates a new user account. Verifies Stellar wallet ownership via the
-        signed challenge. Returns a JWT on success.
+        Mendaftarkan akun user baru (Investor atau Entrepreneur) menggunakan hasil tanda tangan dari challenge.
 
-        - `role` must be `ENTREPRENEUR` or `INVESTOR`
-        - `email` is **required** when `role` is `ENTREPRENEUR`
+        **Untuk Frontend:**
+        - Pastikan sudah memanggil `/auth/challenge` sebelumnya.
+        - Kirim role (`ENTREPRENEUR` atau `INVESTOR`).
+        - Jika role `ENTREPRENEUR`, wajib mengirimkan `email`.
+        - Jika berhasil, akan mengembalikan token JWT untuk autentikasi endpoint lain.
       operationId: authRegister
       security: []
       requestBody:
@@ -1458,11 +1544,15 @@ paths:
 
   /auth/login:
     post:
-      tags: [auth]
-      summary: Log in an existing user
+      tags: [ auth ]
+      summary: Login User
       description: |
-        Authenticates an existing user by verifying the signed challenge.
-        Returns a JWT on success.
+        Autentikasi user yang sudah terdaftar menggunakan hasil tanda tangan dari challenge.
+
+        **Untuk Frontend:**
+        - Pastikan sudah memanggil `/auth/challenge` sebelumnya.
+        - Kirim hasil tanda tangan ke endpoint ini.
+        - Jika berhasil, simpan token JWT yang dikembalikan untuk mengakses endpoint yang membutuhkan autentikasi.
       operationId: authLogin
       security: []
       requestBody:
@@ -1493,16 +1583,15 @@ paths:
 
   /kyc:
     post:
-      tags: [kyc]
-      summary: Submit KYC
+      tags: [ kyc ]
+      summary: Kirim Data KYC (Identitas)
       description: |
-        Submits identity verification for the authenticated user (entrepreneur
-        or investor — one KYC per user). Both `idCard` and `selfie` images are
-        required (JPEG or PNG, ≤ 5 MB each).
+        Mengirimkan data verifikasi identitas (KTP dan Foto Selfie) untuk user yang sedang login.
 
-        The `nationalId` (NIK) must be unique — a second submission with an
-        existing NIK returns **409**. Resubmission on a `REJECTED` profile
-        overwrites the previous record (upsert on `userId`).
+        **Untuk Frontend:**
+        - Gunakan `multipart/form-data` untuk mengunggah file `idCard` dan `selfie` (Maksimal 5MB, format JPEG/PNG).
+        - Field `nationalId` (NIK) harus unik, tidak boleh sama dengan user lain.
+        - Jika profil sebelumnya ditolak (`REJECTED`), memanggil endpoint ini akan menimpa (update) data sebelumnya dan mengubah status kembali ke `PENDING`.
       operationId: kycSubmit
       security:
         - BearerAuth: []
@@ -1512,7 +1601,7 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [fullName, nationalId, idCard, selfie]
+              required: [ fullName, nationalId, idCard, selfie ]
               properties:
                 fullName:
                   type: string
@@ -1563,9 +1652,14 @@ paths:
 
   /kyc/me:
     get:
-      tags: [kyc]
-      summary: Get own KYC status
-      description: Returns the authenticated user's current KYC profile.
+      tags: [ kyc ]
+      summary: Lihat Status KYC Saya
+      description: |
+        Mendapatkan status dan data KYC dari user yang sedang login.
+
+        **Untuk Frontend:**
+        - Gunakan endpoint ini untuk mengecek apakah user masih `PENDING`, `APPROVED`, atau `REJECTED`.
+        - Jika `REJECTED`, alasan penolakan (`reason`) akan tersedia di response, tampilkan pesan ini kepada user agar mereka bisa memperbaiki datanya.
       operationId: kycGetMine
       security:
         - BearerAuth: []
@@ -1589,11 +1683,14 @@ paths:
 
   /admin/kyc:
     get:
-      tags: [admin]
-      summary: List KYC submissions
+      tags: [ admin ]
+      summary: Daftar Pengajuan KYC (Admin)
       description: |
-        Returns KYC submissions filtered by status. Defaults to `PENDING`.
-        Each item includes presigned image URLs (5-minute TTL) for in-browser review.
+        Mendapatkan daftar semua pengajuan KYC (default: yang berstatus `PENDING`).
+
+        **Untuk Frontend Admin:**
+        - Response sudah termasuk URL gambar KTP dan Selfie (presigned URL) yang bisa langsung dirender di tag `<img>`.
+        - URL ini hanya berlaku selama 5 menit.
       operationId: adminKycList
       security:
         - BearerAuth: []
@@ -1626,13 +1723,14 @@ paths:
 
   /admin/kyc/{userId}/approve:
     post:
-      tags: [admin]
-      summary: Approve a KYC submission
+      tags: [ admin ]
+      summary: Setujui KYC User (Admin)
       description: |
-        Transitions the user's profile from `PENDING` to `APPROVED` and enqueues an
-        on-chain `ComplianceRegistry.add(wallet)` job (idempotent, retried with backoff)
-        so the wallet becomes whitelisted to invest.
-        Only `PENDING` profiles can be approved — any other state returns **409**.
+        Menerima pengajuan KYC user. Mengubah status dari `PENDING` menjadi `APPROVED`.
+
+        **Untuk Frontend Admin:**
+        - Tombol "Approve" harus memanggil endpoint ini.
+        - Di background, sistem akan mendaftarkan wallet user ke blockchain agar bisa berinvestasi.
       operationId: adminKycApprove
       security:
         - BearerAuth: []
@@ -1666,12 +1764,14 @@ paths:
 
   /admin/kyc/{userId}/reject:
     post:
-      tags: [admin]
-      summary: Reject a KYC submission
+      tags: [ admin ]
+      summary: Tolak KYC User (Admin)
       description: |
-        Transitions the entrepreneur's profile from `PENDING` to `REJECTED`.
-        The `reason` is stored and returned to the entrepreneur via `GET /kyc/me`.
-        Only `PENDING` profiles can be rejected — any other state returns **409**.
+        Menolak pengajuan KYC user dengan menyertakan alasan penolakan.
+
+        **Untuk Frontend Admin:**
+        - Sediakan form input alasan penolakan (misal: "Foto KTP buram").
+        - Ubah status KYC menjadi `REJECTED`.
       operationId: adminKycReject
       security:
         - BearerAuth: []
@@ -1717,13 +1817,13 @@ paths:
 
   /admin/kyc/{userId}/revoke:
     post:
-      tags: [admin]
-      summary: Revoke a previously-approved KYC
+      tags: [ admin ]
+      summary: Cabut Status KYC (Admin)
       description: |
-        Transitions the user's profile from `APPROVED` to `REVOKED` (expiry/sanction)
-        and enqueues an on-chain `ComplianceRegistry.remove(wallet)` job, after which
-        the wallet can no longer receive shares. Only `APPROVED` profiles can be
-        revoked — any other state returns **409**.
+        Mencabut status KYC yang sebelumnya sudah `APPROVED` menjadi `REVOKED`.
+
+        **Untuk Frontend Admin:**
+        - Gunakan ini jika ada pelanggaran sehingga user tidak bisa lagi bertransaksi atau menerima saham di platform.
       operationId: adminKycRevoke
       security:
         - BearerAuth: []
@@ -1769,11 +1869,13 @@ paths:
 
   /admin/proposals:
     get:
-      tags: [admin]
-      summary: List proposals for review
+      tags: [ admin ]
+      summary: Daftar Proposal Kampanye (Admin)
       description: |
-        Returns proposals filtered by status for the admin review queue, oldest
-        submission first. Defaults to `SUBMITTED`. Requires the `ADMIN` role.
+        Mendapatkan daftar proposal pendanaan yang diajukan oleh Entrepreneur untuk direview (default: `SUBMITTED`).
+
+        **Untuk Frontend Admin:**
+        - Tampilkan list proposal yang menunggu persetujuan admin.
       operationId: adminProposalList
       security:
         - BearerAuth: []
@@ -1806,17 +1908,14 @@ paths:
 
   /admin/proposals/{id}/approve:
     post:
-      tags: [admin]
-      summary: Approve a proposal
+      tags: [ admin ]
+      summary: Setujui Proposal (Admin)
       description: |
-        Approves a `SUBMITTED` or `UNDER_REVIEW` proposal: records an admin review,
-        transitions the proposal to `APPROVED`, creates its off-chain campaign
-        mirror, and **enqueues the asynchronous on-chain deploy** of the campaign's
-        ShareToken + Campaign contracts. The deploy runs in the background; the
-        returned `campaignId` can be polled for live status. Requires the `ADMIN` role.
+        Menyetujui proposal dan memulai proses pembuatan kampanye (smart contract) di blockchain.
 
-        Only a `SUBMITTED`/`UNDER_REVIEW` proposal can be approved — any other state
-        returns **409**.
+        **Untuk Frontend Admin:**
+        - Proses blockchain berjalan di background secara asinkron.
+        - Endpoint mengembalikan `campaignId`, UI admin bisa melakukan polling menggunakan ID ini untuk melihat status akhir dari kampanye.
       operationId: adminProposalApprove
       security:
         - BearerAuth: []
@@ -1850,12 +1949,13 @@ paths:
 
   /admin/proposals/{id}/reject:
     post:
-      tags: [admin]
-      summary: Reject a proposal
+      tags: [ admin ]
+      summary: Tolak Proposal (Admin)
       description: |
-        Rejects a `SUBMITTED` or `UNDER_REVIEW` proposal with a reason and records an
-        admin review. No campaign is created. Requires the `ADMIN` role. Only a
-        `SUBMITTED`/`UNDER_REVIEW` proposal can be rejected — any other state returns **409**.
+        Menolak proposal pendanaan dengan memberikan alasan.
+
+        **Untuk Frontend Admin:**
+        - Tampilkan form untuk memasukkan alasan penolakan sebelum memanggil endpoint ini.
       operationId: adminProposalReject
       security:
         - BearerAuth: []
@@ -1901,22 +2001,14 @@ paths:
 
   /admin/campaigns/{id}/cancel:
     post:
-      tags: [admin]
-      summary: Cancel a campaign and open a refund
+      tags: [ admin ]
+      summary: Batalkan Kampanye (Admin)
       description: |
-        Cancels a problematic **funded** campaign and opens its refund. In one
-        transaction the campaign flips to `CANCELLED` and a `Refund` row (PENDING) is
-        created; **after commit** the refund orchestrator is enqueued. The
-        orchestrator freezes the contract on-chain (`cancel()` — `invest()` and
-        `release_milestone()` then revert), snapshots current share ownership, splits
-        the **remaining custody** (`raised − released`) integer-floor pro-rata, and
-        posts the refund Merkle root (`set_refund`). None of that on-chain work runs
-        inside the request. Requires the `ADMIN` role.
+        Membatalkan kampanye yang bermasalah dan memulai proses pengembalian dana (refund) ke investor.
 
-        Only a campaign that is **live on-chain** and not already terminal can be
-        cancelled: an already-`CANCELLED` or `COMPLETED` campaign, or one not yet
-        `LIVE`, returns **409**. Idempotent — re-cancelling returns the existing
-        refund (and re-enqueues it if it stalled).
+        **Untuk Frontend Admin:**
+        - Endpoint ini mengubah status kampanye jadi `CANCELLED` dan memulai proses on-chain di background.
+        - Hanya bisa dipanggil jika kampanye berstatus `LIVE`.
       operationId: adminCampaignCancel
       security:
         - BearerAuth: []
@@ -1962,12 +2054,14 @@ paths:
 
   /proposals:
     post:
-      tags: [proposals]
-      summary: Create a funding proposal (draft)
+      tags: [ proposals ]
+      summary: Buat Draf Proposal Baru
       description: |
-        Creates a funding proposal in `DRAFT` status. Off-chain only — no on-chain
-        campaign is created at this stage. Requires the `ENTREPRENEUR` role **and**
-        an `APPROVED` KYC profile; otherwise returns **403**.
+        Membuat proposal pendanaan baru dengan status awal `DRAFT`.
+
+        **Untuk Frontend Entrepreneur:**
+        - Data belum dikirim ke admin, baru tersimpan sebagai draf.
+        - User harus memiliki role `ENTREPRENEUR` dan KYC sudah `APPROVED`.
       operationId: proposalCreate
       security:
         - BearerAuth: []
@@ -1995,11 +2089,13 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
     get:
-      tags: [proposals]
-      summary: List own proposals
+      tags: [ proposals ]
+      summary: Daftar Proposal Saya
       description: |
-        Returns the authenticated entrepreneur's own proposals, newest first.
-        Requires the `ENTREPRENEUR` role.
+        Mendapatkan daftar semua proposal yang pernah dibuat oleh entrepreneur yang sedang login.
+
+        **Untuk Frontend Entrepreneur:**
+        - Tampilkan riwayat proposal beserta statusnya (`DRAFT`, `SUBMITTED`, `APPROVED`, dll).
       operationId: proposalList
       security:
         - BearerAuth: []
@@ -2019,11 +2115,13 @@ paths:
 
   /proposals/{id}:
     get:
-      tags: [proposals]
-      summary: Get one own proposal
+      tags: [ proposals ]
+      summary: Detail Proposal Saya
       description: |
-        Returns a single proposal owned by the authenticated entrepreneur. A
-        proposal that does not exist or belongs to another user returns **404**.
+        Mendapatkan detail dari satu proposal spesifik milik entrepreneur.
+
+        **Untuk Frontend Entrepreneur:**
+        - Gunakan untuk mengisi form edit jika proposal masih berstatus `DRAFT`.
       operationId: proposalGet
       security:
         - BearerAuth: []
@@ -2049,12 +2147,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
-      tags: [proposals]
-      summary: Edit a draft proposal
+      tags: [ proposals ]
+      summary: Edit Draf Proposal
       description: |
-        Updates fields of the caller's proposal while it is still in `DRAFT`.
-        Requires the `ENTREPRENEUR` role and an `APPROVED` KYC profile. A proposal
-        that is no longer a draft returns **409**.
+        Memperbarui isi dari proposal yang masih berstatus `DRAFT`.
+
+        **Untuk Frontend Entrepreneur:**
+        - Kirim hanya field yang berubah.
+        - Akan gagal jika proposal sudah di-submit (bukan `DRAFT`).
       operationId: proposalUpdate
       security:
         - BearerAuth: []
@@ -2100,13 +2200,13 @@ paths:
 
   /proposals/{id}/submit:
     post:
-      tags: [proposals]
-      summary: Submit a draft proposal for review
+      tags: [ proposals ]
+      summary: Ajukan Proposal ke Admin
       description: |
-        Transitions the caller's proposal from `DRAFT` to `SUBMITTED` and stamps
-        `submittedAt`, queuing it for admin review. Requires the `ENTREPRENEUR`
-        role and an `APPROVED` KYC profile. A proposal that is not a `DRAFT`
-        returns **409**.
+        Mengirim proposal yang masih `DRAFT` menjadi `SUBMITTED` agar bisa direview oleh tim Admin.
+
+        **Untuk Frontend Entrepreneur:**
+        - Gunakan di tombol "Submit Proposal". Setelah ini, proposal tidak bisa di-edit lagi oleh user.
       operationId: proposalSubmit
       security:
         - BearerAuth: []
@@ -2140,11 +2240,14 @@ paths:
 
   /campaigns:
     get:
-      tags: [campaigns]
-      summary: List live campaigns
+      tags: [ campaigns ]
+      summary: Daftar Kampanye Aktif
       description: |
-        Public, unauthenticated. Returns campaigns whose on-chain contracts are
-        live (deploy complete), newest first — the investment marketplace.
+        Mendapatkan daftar semua kampanye pendanaan yang sedang aktif (smart contract sudah live di blockchain).
+
+        **Untuk Frontend:**
+        - API ini Publik (tidak butuh token login).
+        - Gunakan untuk halaman utama marketplace/explore.
       operationId: campaignList
       security: []
       responses:
@@ -2159,11 +2262,14 @@ paths:
 
   /campaigns/{id}:
     get:
-      tags: [campaigns]
-      summary: Get campaign detail
+      tags: [ campaigns ]
+      summary: Detail Kampanye
       description: |
-        Public, unauthenticated. Returns a single campaign, including its on-chain
-        contract + share-token addresses (needed to prepare an investment).
+        Mendapatkan informasi detail tentang sebuah kampanye.
+
+        **Untuk Frontend:**
+        - Publik (tidak butuh token).
+        - Mengandung alamat smart contract dan token saham yang dibutuhkan jika user ingin berinvestasi.
       operationId: campaignGet
       security: []
       parameters:
@@ -2186,13 +2292,14 @@ paths:
 
   /campaigns/{id}/holdings:
     get:
-      tags: [holdings]
-      summary: Get a campaign's cap table
+      tags: [ holdings ]
+      summary: Daftar Pemegang Saham (Cap Table)
       description: |
-        Public, unauthenticated. Returns the campaign's current share holders
-        (`balance > 0`), heaviest first. Holder identity is **masked** — truncated
-        wallet address + initials-only display name; legal KYC names are never
-        exposed. An unknown campaign id returns **404**.
+        Mendapatkan daftar investor yang memegang saham pada kampanye ini.
+
+        **Untuk Frontend:**
+        - Publik.
+        - Identitas investor disensor (hanya inisial nama dan alamat wallet yang dipersingkat) untuk privasi.
       operationId: campaignHoldings
       security: []
       parameters:
@@ -2217,14 +2324,16 @@ paths:
 
   /campaigns/{campaignId}/investments/prepare:
     post:
-      tags: [investments]
-      summary: Prepare an invest() transaction
+      tags: [ investments ]
+      summary: Siapkan Transaksi Investasi (XDR)
       description: |
-        Builds and simulates an `invest()` transaction **sourced at the investor's
-        wallet** and returns the unsigned XDR for the wallet to sign. Requires the
-        `INVESTOR` role **and** an `APPROVED` KYC profile; otherwise **403**. The
-        campaign must be live/active — otherwise **409**. No `Investment` row is
-        created at this step.
+        Tahap 1 Investasi: Membuat transaksi mentah (XDR) dari blockchain yang siap ditandatangani oleh wallet investor.
+
+        **Untuk Frontend Investor:**
+        - User (Investor) memasukkan nominal investasi, lalu frontend memanggil endpoint ini.
+        - Response berupa string XDR.
+        - Minta wallet (Freighter) untuk menandatangani string XDR ini.
+        - Belum ada data yang disimpan di database platform pada tahap ini.
       operationId: investmentPrepare
       security:
         - BearerAuth: []
@@ -2270,16 +2379,15 @@ paths:
 
   /campaigns/{campaignId}/investments:
     post:
-      tags: [investments]
-      summary: Submit a signed invest() transaction
+      tags: [ investments ]
+      summary: Kirim Transaksi Investasi (Submit)
       description: |
-        Verifies the investor-signed transaction really is this investor's
-        `invest()` on this campaign, wraps it in a **platform fee-bump**, submits
-        it on-chain, and — on success — records the `Investment` (`CONFIRMED`) and
-        bumps the campaign's `raisedAmount` and vault balance. Idempotent on the
-        transaction hash: re-submitting the same signed tx returns the existing
-        `Investment` instead of duplicating it. Requires the `INVESTOR` role and an
-        `APPROVED` KYC profile.
+        Tahap 2 Investasi: Mengirim XDR yang sudah ditandatangani oleh wallet investor ke blockchain.
+
+        **Untuk Frontend Investor:**
+        - Setelah XDR ditandatangani wallet, kirim ke endpoint ini.
+        - Backend akan memprosesnya ke blockchain dan mencatatnya ke database jika sukses.
+        - Idempotent: jika transaksi yang sama dikirim dua kali, tidak akan dobel investasi.
       operationId: investmentSubmit
       security:
         - BearerAuth: []
@@ -2327,11 +2435,13 @@ paths:
 
   /investments/mine:
     get:
-      tags: [investments]
-      summary: List own investments
+      tags: [ investments ]
+      summary: Riwayat Investasi Saya
       description: |
-        Returns the authenticated investor's own investments, newest first.
-        Requires the `INVESTOR` role.
+        Mendapatkan daftar semua transaksi investasi yang pernah dilakukan oleh investor yang sedang login.
+
+        **Untuk Frontend Investor:**
+        - Gunakan untuk halaman "Riwayat Transaksi" atau "Portofolio".
       operationId: investmentListMine
       security:
         - BearerAuth: []
@@ -2351,12 +2461,14 @@ paths:
 
   /holdings/mine:
     get:
-      tags: [holdings]
-      summary: List own share holdings
+      tags: [ holdings ]
+      summary: Daftar Kepemilikan Saham Saya
       description: |
-        Returns the authenticated investor's own current share holdings
-        (`balance > 0`) across all campaigns, largest first. Own data — not masked.
-        Requires the `INVESTOR` role.
+        Mendapatkan jumlah saham (saldo) yang dimiliki oleh investor di semua kampanye.
+
+        **Untuk Frontend Investor:**
+        - Gunakan untuk menampilkan ringkasan aset/portofolio user.
+        - Berbeda dengan riwayat investasi, endpoint ini menampilkan saldo akhir saham saat ini.
       operationId: holdingListMine
       security:
         - BearerAuth: []
@@ -2376,14 +2488,14 @@ paths:
 
   /campaigns/{campaignId}/distributions/deposit/prepare:
     post:
-      tags: [distributions]
-      summary: Prepare a deposit_profit() transaction
+      tags: [ distributions ]
+      summary: Siapkan Transaksi Pembagian Keuntungan (XDR)
       description: |
-        Builds and simulates a `deposit_profit()` transaction **sourced at the
-        business's wallet** and returns the unsigned XDR for the wallet to sign.
-        Requires the `ENTREPRENEUR` role, an `APPROVED` KYC profile, and **ownership**
-        of the campaign (otherwise **403**); the campaign must be live (otherwise
-        **409**). No `ProfitDistribution` row is created at this step.
+        Tahap 1 Bagi Hasil: Membuat transaksi mentah (XDR) untuk mendepositkan keuntungan bisnis.
+
+        **Untuk Frontend Entrepreneur:**
+        - Entrepreneur memasukkan nominal keuntungan yang akan dibagikan, lalu panggil endpoint ini.
+        - Terima XDR lalu minta wallet Entrepreneur menandatanganinya.
       operationId: distributionDepositPrepare
       security:
         - BearerAuth: []
@@ -2429,15 +2541,14 @@ paths:
 
   /campaigns/{campaignId}/distributions/deposit:
     post:
-      tags: [distributions]
-      summary: Submit a signed deposit_profit() transaction
+      tags: [ distributions ]
+      summary: Kirim Transaksi Bagi Hasil (Submit)
       description: |
-        Verifies the business-signed transaction really is this campaign's
-        `deposit_profit()`, wraps it in a **platform fee-bump**, submits it on-chain,
-        and — on success — opens a `ProfitDistribution` (`PENDING`) and enqueues the
-        orchestrator that snapshots holdings, builds the Merkle tree, and posts the
-        root. Idempotent on the transaction hash. Requires the `ENTREPRENEUR` role,
-        an `APPROVED` KYC profile, and ownership of the campaign.
+        Tahap 2 Bagi Hasil: Mengirim XDR bagi hasil yang sudah ditandatangani ke blockchain.
+
+        **Untuk Frontend Entrepreneur:**
+        - Kirim XDR dari tahap 1.
+        - Backend akan memproses ke blockchain dan secara asinkron (background) akan menghitung jatah dividen (Merkle Tree) untuk masing-masing investor.
       operationId: distributionDepositSubmit
       security:
         - BearerAuth: []
@@ -2485,11 +2596,13 @@ paths:
 
   /campaigns/{campaignId}/distributions:
     get:
-      tags: [distributions]
-      summary: List a campaign's distributions
+      tags: [ distributions ]
+      summary: Riwayat Bagi Hasil Kampanye
       description: |
-        Returns a campaign's profit distributions, newest first. An unknown campaign
-        id returns **404**.
+        Mendapatkan daftar semua pembagian keuntungan (dividen) yang pernah dilakukan di sebuah kampanye.
+
+        **Untuk Frontend:**
+        - Tampilkan di halaman detail kampanye tab "Riwayat Dividen".
       operationId: distributionListForCampaign
       security:
         - BearerAuth: []
@@ -2517,11 +2630,13 @@ paths:
 
   /distributions/mine:
     get:
-      tags: [distributions]
-      summary: List own dividend entitlements
+      tags: [ distributions ]
+      summary: Daftar Jatah Dividen Saya
       description: |
-        Returns the authenticated investor's own `DistributionClaim` entitlements
-        (with Merkle proofs), newest first. Requires the `INVESTOR` role.
+        Mendapatkan daftar dividen yang berhak diklaim (atau sudah diklaim) oleh investor yang sedang login.
+
+        **Untuk Frontend Investor:**
+        - Gunakan untuk halaman "Klaim Keuntungan". Sudah termasuk data _Merkle proof_ yang dibutuhkan untuk melakukan klaim.
       operationId: distributionListMine
       security:
         - BearerAuth: []
@@ -2541,15 +2656,15 @@ paths:
 
   /distributions/{distributionId}/claim/prepare:
     post:
-      tags: [distributions]
-      summary: Prepare a claim() transaction
+      tags: [ distributions ]
+      summary: Siapkan Transaksi Klaim Dividen (XDR)
       description: |
-        Builds and simulates a `claim()` transaction **sourced at the investor's
-        wallet** — filling in the on-chain distribution id, leaf index, amount, and
-        Merkle proof from the caller's entitlement — and returns the unsigned XDR to
-        sign. Requires the `INVESTOR` role and an `APPROVED` KYC profile. **404** if
-        the caller has no entitlement; **409** if the distribution is not yet
-        `COMPLETED` or the entitlement is already claimed.
+        Tahap 1 Klaim: Membuat transaksi mentah (XDR) untuk mencairkan jatah dividen.
+
+        **Untuk Frontend Investor:**
+        - Panggil endpoint ini untuk mendapatkan string XDR.
+        - Minta wallet investor menandatangani XDR tersebut.
+        - Akan gagal (404/409) jika user tidak punya hak klaim atau sudah diklaim sebelumnya.
       operationId: distributionClaimPrepare
       security:
         - BearerAuth: []
@@ -2583,15 +2698,13 @@ paths:
 
   /distributions/{distributionId}/claim:
     post:
-      tags: [distributions]
-      summary: Submit a signed claim() transaction
+      tags: [ distributions ]
+      summary: Kirim Transaksi Klaim Dividen (Submit)
       description: |
-        Verifies the investor-signed transaction really is this investor's `claim()`
-        for this entitlement (matching contract, distribution id, leaf index,
-        claimant, and amount), wraps it in a **platform fee-bump**, submits it, and —
-        on success — marks the `DistributionClaim` `CLAIMED` and bumps the
-        distribution's `totalClaimed`. Idempotent on the transaction hash. Requires
-        the `INVESTOR` role and an `APPROVED` KYC profile.
+        Tahap 2 Klaim: Mengirim XDR klaim dividen yang sudah ditandatangani ke blockchain.
+
+        **Untuk Frontend Investor:**
+        - Setelah sukses, dana dividen akan masuk ke wallet investor dan status klaim di database akan berubah menjadi `CLAIMED`.
       operationId: distributionClaimSubmit
       security:
         - BearerAuth: []
@@ -2639,11 +2752,14 @@ paths:
 
   /milestones:
     get:
-      tags: [milestones]
-      summary: List a campaign's milestones
+      tags: [ milestones ]
+      summary: Daftar Milestone Kampanye
       description: |
-        Returns a campaign's milestones, ordered — for the investor voting UI.
-        Any authenticated user may read.
+        Mendapatkan daftar pencairan dana (milestone) untuk sebuah kampanye.
+
+        **Untuk Frontend:**
+        - Digunakan oleh Investor untuk melihat timeline pencairan dana.
+        - Berguna untuk merender UI Voting (Persetujuan Pencairan).
       operationId: milestoneList
       security:
         - BearerAuth: []
@@ -2669,13 +2785,14 @@ paths:
 
   /milestones/{milestoneId}:
     get:
-      tags: [milestones]
-      summary: Get milestone detail
+      tags: [ milestones ]
+      summary: Detail & Status Voting Milestone
       description: |
-        Returns one milestone with its running vote tally (participation, approve/
-        reject weight, quorum/approval status), a presigned URL for the
-        proof-of-progress file (if submitted), and the caller's own ballot, if any.
-        Any authenticated user may read.
+        Mendapatkan progres voting untuk sebuah milestone (persentase setuju/tolak, status).
+
+        **Untuk Frontend:**
+        - Menampilkan data detail termasuk link URL file bukti progres (bukti kerja) jika ada.
+        - Termasuk data apakah investor yang sedang login sudah melakukan vote atau belum.
       operationId: milestoneGet
       security:
         - BearerAuth: []
@@ -2701,17 +2818,14 @@ paths:
 
   /milestones/{milestoneId}/submit:
     post:
-      tags: [milestones]
-      summary: Submit a milestone for release (opens voting)
+      tags: [ milestones ]
+      summary: Ajukan Pencairan Milestone (Buka Voting)
       description: |
-        The entrepreneur submits a `PENDING` milestone for release, attaching a
-        proof-of-progress file (JPEG, PNG, or PDF, ≤ 5 MB). Requires ownership of
-        the parent proposal, the `ENTREPRENEUR` role, and an `APPROVED` KYC
-        profile. Gated: the campaign must be **fully funded** (`raisedAmount >=
-        goalAmount`) and every lower-order milestone must already be `RELEASED`
-        (sequential release). On success the total supply is snapshotted (the
-        quorum denominator) and the milestone transitions `PENDING` → `VOTING`
-        with a `MILESTONE_VOTING_WINDOW_SECONDS`-long window (default 7 days).
+        Entrepreneur mengajukan pencairan dana ke milestone berikutnya dengan melampirkan file bukti kerja/progres.
+
+        **Untuk Frontend Entrepreneur:**
+        - Gunakan `multipart/form-data` untuk mengunggah file `proof` (Max 5MB).
+        - Jika berhasil, akan membuka periode masa voting bagi investor (default 7 hari).
       operationId: milestoneSubmit
       security:
         - BearerAuth: []
@@ -2729,7 +2843,7 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [proof]
+              required: [ proof ]
               properties:
                 proof:
                   type: string
@@ -2770,14 +2884,14 @@ paths:
 
   /milestones/{milestoneId}/vote:
     post:
-      tags: [milestones]
-      summary: Cast or change a vote on a milestone
+      tags: [ milestones ]
+      summary: Vote Pencairan Milestone
       description: |
-        Investor casts (or updates) a ballot on a `VOTING` milestone, weighted by
-        the caller's current share balance in the campaign. Idempotent per
-        (milestone, investor) — voting again before the deadline replaces the
-        previous choice and refreshes the weight. Requires the `INVESTOR` role and
-        an `APPROVED` KYC profile.
+        Investor memberikan suara (setuju/tolak) terhadap pencairan dana milestone.
+
+        **Untuk Frontend Investor:**
+        - Bobot suara ditentukan oleh jumlah kepemilikan saham investor di kampanye tersebut.
+        - Investor bisa mengubah suara (vote ulang) selama masa voting belum ditutup.
       operationId: milestoneVote
       security:
         - BearerAuth: []
@@ -2814,7 +2928,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Voting is not open for this milestone (not VOTING, or the window has closed)
+          description: Voting is not open for this milestone (not VOTING, or the window
+            has closed)
           content:
             application/json:
               schema:
@@ -2822,12 +2937,13 @@ paths:
 
   /campaigns/{campaignId}/refund:
     get:
-      tags: [refunds]
-      summary: Get a campaign's refund
+      tags: [ refunds ]
+      summary: Info Refund Kampanye
       description: |
-        Returns the campaign's refund (status + totals), or `null` if the campaign
-        has not been cancelled. Any authenticated user may read. An unknown campaign
-        id returns **404**.
+        Mendapatkan detail pengembalian dana (refund) untuk kampanye yang dibatalkan.
+
+        **Untuk Frontend:**
+        - Mengembalikan `null` jika kampanye belum/tidak dibatalkan.
       operationId: campaignRefundGet
       security:
         - BearerAuth: []
@@ -2855,11 +2971,13 @@ paths:
 
   /refunds/mine:
     get:
-      tags: [refunds]
-      summary: List own refund entitlements
+      tags: [ refunds ]
+      summary: Daftar Jatah Refund Saya
       description: |
-        Returns the authenticated investor's own `RefundClaim` entitlements (with
-        Merkle proofs), newest first. Requires the `INVESTOR` role.
+        Mendapatkan daftar refund yang berhak diklaim oleh investor dari berbagai kampanye yang batal.
+
+        **Untuk Frontend Investor:**
+        - Tampilkan di halaman "Klaim Refund".
       operationId: refundListMine
       security:
         - BearerAuth: []
@@ -2879,15 +2997,13 @@ paths:
 
   /refunds/{refundId}/claim/prepare:
     post:
-      tags: [refunds]
-      summary: Prepare a refund_claim() transaction
+      tags: [ refunds ]
+      summary: Siapkan Transaksi Klaim Refund (XDR)
       description: |
-        Builds and simulates a `refund_claim()` transaction **sourced at the
-        investor's wallet** — filling in the leaf index, wallet, amount, and Merkle
-        proof from the caller's entitlement — and returns the unsigned XDR to sign.
-        Requires the `INVESTOR` role and an `APPROVED` KYC profile. **404** if the
-        caller has no entitlement; **409** if the refund is not yet `COMPLETED` or
-        the entitlement is already claimed.
+        Tahap 1 Klaim Refund: Membuat transaksi mentah (XDR) untuk mencairkan jatah refund.
+
+        **Untuk Frontend Investor:**
+        - Sama mekanismenya dengan klaim dividen. Panggil ini lalu minta wallet menandatangani XDR.
       operationId: refundClaimPrepare
       security:
         - BearerAuth: []
@@ -2921,15 +3037,13 @@ paths:
 
   /refunds/{refundId}/claim:
     post:
-      tags: [refunds]
-      summary: Submit a signed refund_claim() transaction
+      tags: [ refunds ]
+      summary: Kirim Transaksi Klaim Refund (Submit)
       description: |
-        Verifies the investor-signed transaction really is this investor's
-        `refund_claim()` for this entitlement (matching contract, leaf index,
-        claimant, and amount), wraps it in a **platform fee-bump**, submits it, and —
-        on success — marks the `RefundClaim` `CLAIMED` and bumps the refund's
-        `totalClaimed`. Idempotent on the transaction hash. Requires the `INVESTOR`
-        role and an `APPROVED` KYC profile.
+        Tahap 2 Klaim Refund: Mengirim XDR klaim refund yang sudah ditandatangani ke blockchain.
+
+        **Untuk Frontend Investor:**
+        - Setelah sukses, dana refund akan kembali ke wallet investor.
       operationId: refundClaimSubmit
       security:
         - BearerAuth: []
