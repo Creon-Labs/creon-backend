@@ -51,6 +51,11 @@ The full lifecycle spans the off-chain backend and the on-chain contracts:
    a **Merkle tree**, and posts the root on-chain; investors **pull dividends** with a
    proof via `claim()`.
 
+If a campaign turns out to be problematic instead, an admin can **cancel** it at any
+point after step 3: this freezes further on-chain activity (`invest` and
+`release_milestone` both revert afterward) and opens a **refund** of the remaining
+custody back to investors, pro-rata, via the same Merkle-proof relay as dividends.
+
 ## Architecture
 
 ```mermaid
@@ -58,7 +63,7 @@ flowchart TB
     CLIENT(["Web client / wallet"])
 
     subgraph BE["NestJS backend"]
-        API["Domain modules<br/>auth · kyc · admin · proposal<br/>campaign · investment · distribution · milestone"]
+        API["Domain modules<br/>auth · kyc · admin · proposal<br/>campaign · investment · distribution · milestone · refund"]
         ORCH["BullMQ orchestrators<br/>idempotent · resumable · reconcile loops"]
         IDX["Ownership indexer<br/>rebuilds TokenHolding"]
     end
@@ -103,15 +108,16 @@ the loop the other way, polling contract events and reading fresh on-chain balan
 
 Persistence, wallet-auth, KYC + admin approval, entrepreneur proposals, **on-chain
 campaign deploy**, **KYC whitelist sync**, investment recording, the **ownership
-indexer**, the **dividend distribution + claim flow** (Merkle snapshots), and
-**milestone-gated release** are implemented, each with colocated unit tests. The three
-Soroban contracts are deployed to **testnet** and were verified end-to-end on-chain
-(2026-07-02).
+indexer**, the **dividend distribution + claim flow** (Merkle snapshots),
+**milestone-gated release**, and an **admin-triggered refund/cancellation flow** are
+implemented, each with colocated unit tests. The three Soroban contracts are deployed
+to **testnet** and were verified end-to-end on-chain (2026-07-02).
 
 Remaining work is post-hackathon hardening and a full on-chain e2e run (needs a funded
 `STELLAR_PLATFORM_SECRET`). **Honesty note:** the recorded `Campaign` WASM hash predates
-the milestone constructor change (it gained `milestone_amounts`), so milestone release is
-implemented + unit-tested with a Campaign WASM redeploy pending — same caveat as
+the milestone constructor change (it gained `milestone_amounts`), so both milestone
+release and the refund path — which ships in that same build — are implemented +
+unit-tested with a Campaign WASM redeploy pending; same caveat as
 [`contracts/README.md`](contracts/README.md).
 
 ## Backend module map
@@ -128,6 +134,7 @@ Each domain module lives under [`src/`](src) with colocated `*.spec.ts` tests.
 | [`investment`](src/investment) | Records investments via a prepare/submit relay (the investor signs `invest`). |
 | [`distribution`](src/distribution) | Dividend orchestrator: snapshot holdings → Merkle tree → `set_distribution` → investor `claim()`. |
 | [`milestone`](src/milestone) | Staged fund release: on-chain `release_milestone` + off-chain weighted voting (quorum + majority). |
+| [`refund`](src/refund) | Admin-triggered cancellation: on-chain `cancel`/`set_refund`, then a `refund_claim` prepare/submit relay paying out the remaining custody pro-rata. |
 | [`indexer`](src/indexer) / [`holding`](src/holding) | Poll contract events + read balances to rebuild `TokenHolding`; serve current ownership. |
 | [`soroban`](src/soroban) | Soroban RPC + transaction-building wrapper; the platform key that owns every contract. |
 | [`prisma`](src/prisma) · [`cache`](src/cache) · [`storage`](src/storage) | Infra wrappers: Postgres (Prisma 7 + pg adapter), Valkey, S3-compatible object store. |
