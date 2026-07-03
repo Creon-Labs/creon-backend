@@ -11,7 +11,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import { Prisma } from '../../generated/prisma/client';
-import { MilestoneStatus, VoteChoice } from '../../generated/prisma/enums';
+import {
+  CampaignStatus,
+  MilestoneStatus,
+  VoteChoice,
+} from '../../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { UploadedFile } from '../kyc/uploaded-file';
@@ -67,7 +71,7 @@ export class MilestoneVotingService implements OnApplicationBootstrap {
         campaignId: true,
         status: true,
         campaign: {
-          select: { raisedAmount: true, goalAmount: true },
+          select: { raisedAmount: true, goalAmount: true, status: true },
         },
       },
     });
@@ -76,6 +80,9 @@ export class MilestoneVotingService implements OnApplicationBootstrap {
     }
     if (!milestone.campaignId || !milestone.campaign) {
       throw new ConflictException('Campaign is not live yet');
+    }
+    if (milestone.campaign.status === CampaignStatus.CANCELLED) {
+      throw new ConflictException('Campaign has been cancelled');
     }
     if (milestone.status !== MilestoneStatus.PENDING) {
       throw new ConflictException(
@@ -154,10 +161,18 @@ export class MilestoneVotingService implements OnApplicationBootstrap {
   async vote(userId: string, milestoneId: string, choice: VoteChoice) {
     const milestone = await this.prisma.milestone.findUnique({
       where: { id: milestoneId },
-      select: { campaignId: true, status: true, votingEndsAt: true },
+      select: {
+        campaignId: true,
+        status: true,
+        votingEndsAt: true,
+        campaign: { select: { status: true } },
+      },
     });
     if (!milestone || !milestone.campaignId) {
       throw new NotFoundException('Milestone not found');
+    }
+    if (milestone.campaign?.status === CampaignStatus.CANCELLED) {
+      throw new ConflictException('Campaign has been cancelled');
     }
     if (
       milestone.status !== MilestoneStatus.VOTING ||
@@ -249,7 +264,12 @@ export class MilestoneVotingService implements OnApplicationBootstrap {
   async settleExpired(): Promise<void> {
     const now = new Date();
     const expired = await this.prisma.milestone.findMany({
-      where: { status: MilestoneStatus.VOTING, votingEndsAt: { lte: now } },
+      where: {
+        status: MilestoneStatus.VOTING,
+        votingEndsAt: { lte: now },
+        // Don't approve/enqueue releases for a cancelled campaign.
+        campaign: { status: { not: CampaignStatus.CANCELLED } },
+      },
       select: { id: true },
     });
     for (const m of expired) {

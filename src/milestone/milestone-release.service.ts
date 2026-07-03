@@ -8,7 +8,7 @@ import {
 import { Interval } from '@nestjs/schedule';
 import { Queue } from 'bullmq';
 import { Prisma } from '../../generated/prisma/client';
-import { MilestoneStatus } from '../../generated/prisma/enums';
+import { CampaignStatus, MilestoneStatus } from '../../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { SorobanService } from '../soroban/soroban.service';
 
@@ -61,7 +61,11 @@ export class MilestoneReleaseService implements OnApplicationBootstrap {
   @Interval(RECONCILE_INTERVAL_MS)
   async reconcile(): Promise<void> {
     const unfinished = await this.prisma.milestone.findMany({
-      where: { status: { in: UNFINISHED } },
+      where: {
+        status: { in: UNFINISHED },
+        // Stop retrying releases on a cancelled campaign (its contract is frozen).
+        campaign: { status: { not: CampaignStatus.CANCELLED } },
+      },
       select: { id: true },
     });
     await Promise.all(unfinished.map((m) => this.enqueue(m.id)));
@@ -89,6 +93,14 @@ export class MilestoneReleaseService implements OnApplicationBootstrap {
   async drive(milestoneId: string): Promise<void> {
     const milestone = await this.load(milestoneId);
     if (milestone.status === MilestoneStatus.RELEASED) return;
+    // A cancelled campaign's contract is frozen (`release_milestone` reverts) and its
+    // principal is being refunded — never attempt release.
+    if (milestone.campaignStatus === CampaignStatus.CANCELLED) {
+      this.logger.warn(
+        `Milestone ${milestoneId} skipped: campaign is cancelled`,
+      );
+      return;
+    }
 
     try {
       await this.ensureReleased(milestone);
@@ -172,7 +184,7 @@ export class MilestoneReleaseService implements OnApplicationBootstrap {
         amount: true,
         status: true,
         releaseTxHash: true,
-        campaign: { select: { contractAddress: true } },
+        campaign: { select: { contractAddress: true, status: true } },
       },
     });
     if (!m) {
@@ -189,6 +201,7 @@ export class MilestoneReleaseService implements OnApplicationBootstrap {
       onchainIndex: m.onchainIndex,
       amount: m.amount,
       status: m.status,
+      campaignStatus: m.campaign.status,
       releaseTxHash: m.releaseTxHash,
       campaign: { contractAddress: m.campaign.contractAddress },
     };
@@ -202,6 +215,7 @@ interface LoadedMilestone {
   onchainIndex: number;
   amount: Prisma.Decimal;
   status: MilestoneStatus;
+  campaignStatus: CampaignStatus;
   releaseTxHash: string | null;
   campaign: { contractAddress: string };
 }
