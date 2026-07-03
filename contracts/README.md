@@ -136,20 +136,23 @@ uploaded WASM hashes by the backend (Phase 2 orchestration).
 ## Build & test
 
 ```bash
-cargo test             # 18 unit/integration tests, all green
+cargo test             # 22 unit/integration tests, all green
 stellar contract build # -> target/wasm32v1-none/release/{compliance_registry,share_token,campaign}.wasm
 ```
 
-Test coverage spans the security surface, not just happy paths — **18 tests** across
-the three crates (11 `campaign`, 3 `share-token`, 4 `compliance-registry`):
+Test coverage spans the security surface, not just happy paths — **22 tests** across
+the three crates (15 `campaign`, 3 `share-token`, 4 `compliance-registry`):
 
 - **Registry:** add → whitelisted, add idempotency, remove revokes, non-owner add rejected.
 - **ShareToken:** mint requires a whitelisted recipient, transfer blocked while locked,
   transfer after unlock still whitelist-gated.
 - **Campaign:** invest happy-path + non-whitelisted revert, sequential milestone
   release, out-of-order / pre-funding / double-release reverts, constructor
-  sum-mismatch revert, unlock enables transfers, and `claim` valid-proof pays while
-  forged & double claims are rejected.
+  sum-mismatch revert, unlock enables transfers, `claim` valid-proof pays while
+  forged & double claims are rejected, and the refund path — `cancel` freezes
+  `invest`/`release_milestone`, `set_refund` requires cancellation and is once-only,
+  `refund_claim` valid-proof pays while forged & double claims are rejected, and a
+  pre-`set_refund` claim reverts.
 
 The `campaign` suite includes a Rust-emitted **Merkle test vector**
 (`print_merkle_test_vector`) that pins the exact leaf/tree encoding — the backend's
