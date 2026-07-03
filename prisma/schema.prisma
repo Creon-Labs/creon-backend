@@ -99,6 +99,21 @@ enum ClaimStatus {
   FAILED
 }
 
+// Refund orchestrator state (cancel on-chain -> snapshot -> set_refund). Mirrors
+// DistributionStatus: idempotent + resumable, resume points derived from persisted data
+// (cancel tx? claims built? root posted?), so PENDING -> COMPLETED (FAILED on error).
+enum RefundStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum RefundClaimStatus {
+  PENDING
+  CLAIMED
+  FAILED
+}
+
 // Milestone lifecycle: authored DRAFT (with the proposal) -> PENDING (campaign live) ->
 // VOTING (entrepreneur submitted for release) -> APPROVED/REJECTED (tally) -> RELEASING
 // -> RELEASED. FAILED on release error. Resume points derive from persisted tx hashes.
@@ -129,14 +144,15 @@ model User {
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  proposals           Proposal[]           @relation("EntrepreneurProposals")
-  reviews             ProposalReview[]     @relation("AdminReviews")
-  investments         Investment[]
-  holdings            TokenHolding[]
-  distributionClaims  DistributionClaim[]
-  milestoneVotes      MilestoneVote[]
-  kycProfile          KycProfile?          @relation("UserKycProfile")
-  kycReviews          KycProfile[]         @relation("AdminKycReviews")
+  proposals          Proposal[]          @relation("EntrepreneurProposals")
+  reviews            ProposalReview[]    @relation("AdminReviews")
+  investments        Investment[]
+  holdings           TokenHolding[]
+  distributionClaims DistributionClaim[]
+  refundClaims       RefundClaim[]
+  milestoneVotes     MilestoneVote[]
+  kycProfile         KycProfile?         @relation("UserKycProfile")
+  kycReviews         KycProfile[]        @relation("AdminKycReviews")
 
   @@map("users")
 }
@@ -213,23 +229,23 @@ model ProposalReview {
 }
 
 model Campaign {
-  id              String         @id @default(uuid()) @db.Uuid
-  proposalId      String         @unique @map("proposal_id") @db.Uuid
-  contractAddress String?        @map("contract_address") @db.VarChar(56)
-  goalAmount      Decimal        @map("goal_amount") @db.Decimal(28, 7)
-  raisedAmount    Decimal        @default(0) @map("raised_amount") @db.Decimal(28, 7)
-  status          CampaignStatus @default(PENDING_DEPLOYMENT)
-  lockStartAt     DateTime?      @map("lock_start_at") @db.Timestamptz
-  lockEndAt       DateTime?      @map("lock_end_at") @db.Timestamptz
-  startAt         DateTime?      @map("start_at") @db.Timestamptz
-  endAt           DateTime?      @map("end_at") @db.Timestamptz
+  id              String               @id @default(uuid()) @db.Uuid
+  proposalId      String               @unique @map("proposal_id") @db.Uuid
+  contractAddress String?              @map("contract_address") @db.VarChar(56)
+  goalAmount      Decimal              @map("goal_amount") @db.Decimal(28, 7)
+  raisedAmount    Decimal              @default(0) @map("raised_amount") @db.Decimal(28, 7)
+  status          CampaignStatus       @default(PENDING_DEPLOYMENT)
+  lockStartAt     DateTime?            @map("lock_start_at") @db.Timestamptz
+  lockEndAt       DateTime?            @map("lock_end_at") @db.Timestamptz
+  startAt         DateTime?            @map("start_at") @db.Timestamptz
+  endAt           DateTime?            @map("end_at") @db.Timestamptz
   deployStatus    CampaignDeployStatus @default(PENDING) @map("deploy_status")
-  deployTxHash    String?        @unique @map("deploy_tx_hash") @db.VarChar(64)
-  wireTxHash      String?        @unique @map("wire_tx_hash") @db.VarChar(64)
-  deployError     String?        @map("deploy_error") @db.Text
-  deployAttempts  Int            @default(0) @map("deploy_attempts")
-  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  deployTxHash    String?              @unique @map("deploy_tx_hash") @db.VarChar(64)
+  wireTxHash      String?              @unique @map("wire_tx_hash") @db.VarChar(64)
+  deployError     String?              @map("deploy_error") @db.Text
+  deployAttempts  Int                  @default(0) @map("deploy_attempts")
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz
 
   proposal      Proposal             @relation(fields: [proposalId], references: [id])
   projectToken  ProjectToken?
@@ -237,6 +253,7 @@ model Campaign {
   investments   Investment[]
   holdings      TokenHolding[]
   distributions ProfitDistribution[]
+  refund        Refund?
   milestones    Milestone[]
 
   @@index([status])
@@ -317,24 +334,24 @@ model TokenHolding {
 }
 
 model ProfitDistribution {
-  id             String             @id @default(uuid()) @db.Uuid
-  campaignId     String             @map("campaign_id") @db.Uuid
-  onchainId      Int                @map("onchain_id") // contract distribution id (u32), per-campaign 0,1,2,…
-  totalAmount    Decimal            @map("total_amount") @db.Decimal(28, 7)
-  totalShares    Decimal?           @map("total_shares") @db.Decimal(28, 7) // null until the orchestrator snapshots holdings
-  rewardPerShare Decimal?           @map("reward_per_share") @db.Decimal(38, 18) // null until snapshotted
-  totalClaimed   Decimal            @default(0) @map("total_claimed") @db.Decimal(28, 7)
-  merkleRoot     String?            @map("merkle_root") @db.VarChar(66)
-  snapshotLedger BigInt?            @map("snapshot_ledger")
-  depositTxHash  String?            @unique @map("deposit_tx_hash") @db.VarChar(64)
+  id                    String             @id @default(uuid()) @db.Uuid
+  campaignId            String             @map("campaign_id") @db.Uuid
+  onchainId             Int                @map("onchain_id") // contract distribution id (u32), per-campaign 0,1,2,…
+  totalAmount           Decimal            @map("total_amount") @db.Decimal(28, 7)
+  totalShares           Decimal?           @map("total_shares") @db.Decimal(28, 7) // null until the orchestrator snapshots holdings
+  rewardPerShare        Decimal?           @map("reward_per_share") @db.Decimal(38, 18) // null until snapshotted
+  totalClaimed          Decimal            @default(0) @map("total_claimed") @db.Decimal(28, 7)
+  merkleRoot            String?            @map("merkle_root") @db.VarChar(66)
+  snapshotLedger        BigInt?            @map("snapshot_ledger")
+  depositTxHash         String?            @unique @map("deposit_tx_hash") @db.VarChar(64)
   // On-chain set_distribution(id, root) tx; unique = idempotent root post.
-  setDistributionTxHash String?     @unique @map("set_distribution_tx_hash") @db.VarChar(64)
-  status               DistributionStatus @default(PENDING)
-  distributionError    String?      @map("distribution_error") @db.Text
-  distributionAttempts Int          @default(0) @map("distribution_attempts")
-  distributedAt  DateTime           @default(now()) @map("distributed_at") @db.Timestamptz
-  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+  setDistributionTxHash String?            @unique @map("set_distribution_tx_hash") @db.VarChar(64)
+  status                DistributionStatus @default(PENDING)
+  distributionError     String?            @map("distribution_error") @db.Text
+  distributionAttempts  Int                @default(0) @map("distribution_attempts")
+  distributedAt         DateTime           @default(now()) @map("distributed_at") @db.Timestamptz
+  createdAt             DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime           @updatedAt @map("updated_at") @db.Timestamptz
 
   campaign Campaign            @relation(fields: [campaignId], references: [id])
   claims   DistributionClaim[]
@@ -364,6 +381,56 @@ model DistributionClaim {
   @@unique([distributionId, investorId])
   @@index([investorId])
   @@map("distribution_claims")
+}
+
+// One refund per campaign, opened when an admin cancels a problematic campaign. Mirrors
+// ProfitDistribution: the orchestrator freezes the contract (cancel), snapshots holders,
+// builds a Merkle tree over the remaining custody (raised - released), and posts the root
+// via set_refund. Investors then pull their pro-rata principal via refund_claim.
+model Refund {
+  id              String       @id @default(uuid()) @db.Uuid
+  campaignId      String       @unique @map("campaign_id") @db.Uuid
+  reason          String?      @db.Text // why the campaign was cancelled
+  totalAmount     Decimal      @default(0) @map("total_amount") @db.Decimal(28, 7) // remaining custody refunded
+  totalShares     Decimal?     @map("total_shares") @db.Decimal(28, 7) // null until the orchestrator snapshots holdings
+  totalClaimed    Decimal      @default(0) @map("total_claimed") @db.Decimal(28, 7)
+  merkleRoot      String?      @map("merkle_root") @db.VarChar(66)
+  snapshotLedger  BigInt?      @map("snapshot_ledger")
+  // On-chain cancel() tx and set_refund(root) tx; unique = idempotent on-chain steps.
+  cancelTxHash    String?      @unique @map("cancel_tx_hash") @db.VarChar(64)
+  setRefundTxHash String?      @unique @map("set_refund_tx_hash") @db.VarChar(64)
+  status          RefundStatus @default(PENDING)
+  refundError     String?      @map("refund_error") @db.Text
+  refundAttempts  Int          @default(0) @map("refund_attempts")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  campaign Campaign      @relation(fields: [campaignId], references: [id])
+  claims   RefundClaim[]
+
+  @@map("refunds")
+}
+
+model RefundClaim {
+  id          String            @id @default(uuid()) @db.Uuid
+  refundId    String            @map("refund_id") @db.Uuid
+  investorId  String            @map("investor_id") @db.Uuid
+  shareAmount Decimal           @map("share_amount") @db.Decimal(28, 7)
+  amount      Decimal           @db.Decimal(28, 7)
+  merkleProof String[]          @map("merkle_proof")
+  leafIndex   Int?              @map("leaf_index")
+  claimTxHash String?           @unique @map("claim_tx_hash") @db.VarChar(64)
+  status      RefundClaimStatus @default(PENDING)
+  claimedAt   DateTime?         @map("claimed_at") @db.Timestamptz
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  refund   Refund @relation(fields: [refundId], references: [id])
+  investor User   @relation(fields: [investorId], references: [id])
+
+  @@unique([refundId, investorId])
+  @@index([investorId])
+  @@map("refund_claims")
 }
 
 model Milestone {
