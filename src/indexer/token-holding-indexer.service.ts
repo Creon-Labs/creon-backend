@@ -30,6 +30,13 @@ const POLL_INTERVAL_MS = Number(process.env.INDEXER_POLL_INTERVAL_MS ?? 30_000);
  * `@Interval` service (no BullMQ): there's no per-entity retry, just one continuous
  * cursor-based loop. The cursor only advances on a fully successful poll, so a
  * failed poll simply re-reads the same window on the next tick.
+ *
+ * `INDEXER_LOOKBACK_LEDGERS` must stay under the RPC's per-request `getEvents`
+ * ledger-range cap (empirically ~10000 ledgers on the public
+ * `soroban-testnet.stellar.org` endpoint) — exceeding it doesn't error, it silently
+ * returns zero events while still reporting the current tip as `latestLedger`,
+ * which would advance the cursor straight past real events on a cold start
+ * (verified 2026-07-03: a 17280 lookback lost two `mint` events this way).
  */
 @Injectable()
 export class TokenHoldingIndexerService implements OnApplicationBootstrap {
@@ -45,7 +52,7 @@ export class TokenHoldingIndexerService implements OnApplicationBootstrap {
     config: ConfigService,
   ) {
     this.lookbackLedgers = Number(
-      config.get<string>('INDEXER_LOOKBACK_LEDGERS') ?? '17280',
+      config.get<string>('INDEXER_LOOKBACK_LEDGERS') ?? '9000',
     );
   }
 

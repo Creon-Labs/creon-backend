@@ -7,9 +7,11 @@
 
   "complianceRegistryAddress": "CDDYCTY4BP7RMNDT5SQQMOHS6FZ5MKVPB4LIVON6MONBD2L6GWCJZ2YF",
   "shareTokenWasmHash": "ae06cdbb78077ef8557d86778ffe5a2a2f5d08829245b61a76ad8f93944571fb",
-  "campaignWasmHash": "462eb8f08bbd4f19b1c67e7b278aadf507b2a661455cb81a368a954e794a51aa",
+  "campaignWasmHash": "d867b498f35a28ace0a8f7d0195b92bd25549eb473703f352a4d74840684bf7b",
+  "campaignWasmUploadedAt": "2026-07-03T00:00:00Z",
+  "campaignWasmUploadTxHash": "d5c9b0cfa409e7088da2723110d3b6c34280b405d713306def4341974d06513d",
   "usdcSacAddress": "CA6NVKD2EVIK73B4YH6JO4XKA2GLGTN222VTOGXAZVNT5QHKLAT3O7N3",
   "usdcAsset": "USDC:GDXTJXOSJOEHZ6VLIYB35ON2YM3FYH6AYIFJ7YHFNCANALD35HTXZ6MR",
 
-  "_comment": "ComplianceRegistry is the live singleton (owner = deployerPublicKey / the backend platform key). ShareToken + Campaign are uploaded (WASM hashes); per-campaign instances are deployed from these hashes by the backend. USDC is a test SAC whose asset is issued by deployerPublicKey."
+  "_comment": "ComplianceRegistry is the live singleton (owner = deployerPublicKey / the backend platform key). ShareToken + Campaign are uploaded (WASM hashes); per-campaign instances are deployed from these hashes by the backend. USDC is a test SAC whose asset is issued by deployerPublicKey. campaignWasmHash was re-uploaded 2026-07-03 after the constructor gained milestone_amounts (Phase 7 milestones) plus the cancel/set_refund/refund_claim path (refund system) -- campaigns deployed from the previous hash (462eb8f0...) keep running under the old WASM; new deploys pick up this hash."
 }
