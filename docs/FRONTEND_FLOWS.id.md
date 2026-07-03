@@ -91,7 +91,7 @@ Hanya berjalan *off-chain* — tidak berinteraksi dengan *contract*. Semua *rout
 
 | Langkah | Method + Path | Catatan |
 |---|---|---|
-| 1 | `POST /proposals` | `{ businessName, businessDescription, category, location?, requestedAmount, lockPeriodDays }` → kembaliannya berupa data Proposal (`DRAFT`) |
+| 1 | `POST /proposals` | `{ businessName, businessDescription, category, location?, requestedAmount, lockPeriodDays, milestones }` → kembaliannya berupa data Proposal (`DRAFT`) |
 | 2 | `PATCH /proposals/:id` | Boleh mengirim sebagian *field* di atas; **hanya bisa saat status `DRAFT`** |
 | 3 | `POST /proposals/:id/submit` | `DRAFT → SUBMITTED` |
 | 4 | `GET /proposals` / `GET /proposals/:id` | Hanya bisa mengakses milik pemanggil API (404 jika bukan milik mereka) |
@@ -99,6 +99,7 @@ Hanya berjalan *off-chain* — tidak berinteraksi dengan *contract*. Semua *rout
 **Catatan Penting:**
 - **`requestedAmount` adalah tipe string** (contoh: `"1500.5000000"`, mendukung hingga 7 desimal) — jangan pernah mengirim tipe JS `number` untuk nominal uang di mana pun dalam API ini.
 - **`lockPeriodDays` adalah integer 1–3650** → nilai ini akan menjadi durasi *lock* modal *on-chain* setelah proses *deploy*; buat pengertiannya jelas di UI ("modal terkunci selama X hari setelah *Campaign* berjalan").
+- **`milestones` wajib diisi** — sebuah array berisi `{ order, title, description, amount }`. `order` harus dimulai dari 1 dan berurutan (kontigu); setiap `amount` berbentuk string nominal uang; seluruh `amount` harus berjumlah **persis sama** dengan `requestedAmount` (divalidasi di sisi server, `400` jika tidak cocok). Data ini akan menjadi jadwal pencairan dana bertahap secara *on-chain* — lihat Flow 8 (Submit Milestone & Voting). `PATCH /proposals/:id` bisa mengganti seluruh set milestone selama masih berstatus `DRAFT`.
 - **Status SUBMITTED bersifat read-only** bagi *Entrepreneur* — lakukan *polling* `GET /proposals/:id` dan pantau perpindahan `status` ke `UNDER_REVIEW` → `APPROVED` / `REJECTED`.
 
 ---
@@ -206,6 +207,66 @@ Menggunakan Pola Relay. Membutuhkan *role* `INVESTOR` + KYC yang disetujui.
 
 ---
 
+## Flow 8 — Submit Milestone & Voting Investor
+
+Milestone mengatur **pencairan bertahap dana pokok (principal)** yang terkumpul — berbeda dari Flow 6/7 yang membahas dividen dari *profit*. Milestone didefinisikan sejak awal bersamaan dengan Proposal (Flow 3): masing-masing memiliki `order`, `title`, `description`, dan `amount`, dengan total *amount* yang berjumlah persis sama dengan `requestedAmount`. Sebuah milestone dimulai dengan status `DRAFT`, berubah menjadi `PENDING` setelah Campaign selesai di-*deploy*, lalu berlanjut melalui proses voting seiring bisnis berjalan.
+
+**Langkah-langkah:**
+1. Setelah Campaign mencapai target pendanaannya, Entrepreneur men-*submit* milestone berikutnya secara berurutan (*multipart*, disertai file bukti kemajuan/*proof*) → membuka jendela voting (default 7 hari).
+2. Investor memberikan suara berbobot (`APPROVE`/`REJECT`) — bobotnya adalah jumlah saham yang mereka miliki saat ini. Mereka bisa mengubah suaranya kapan saja sebelum jendela voting ditutup.
+3. Setelah jendela voting ditutup, sebuah *background job* akan menghitung hasilnya: dibutuhkan **kuorum** (30% dari total suplai saham, di-*snapshot* saat voting dibuka) **dan mayoritas** (>50% dari bobot suara yang masuk) agar disetujui. Jika disetujui, backend akan secara asinkron menjalankan `release_milestone()` secara *on-chain*.
+4. Lakukan *polling* terhadap `status` milestone tersebut hingga mencapai `RELEASED`.
+
+**Endpoints:**
+
+| Langkah | Method + Path | Body → Return |
+|---|---|---|
+| - | `GET /milestones?campaignId=<uuid>` | Daftar milestone suatu Campaign, terurut (bersifat *public*). |
+| - | `GET /milestones/:milestoneId` | Detail + hasil hitung suara (*tally*) yang berjalan + suara milik pemanggil API + `proofUrl` yang sudah di-*presign*. |
+| 1 | `POST /milestones/:milestoneId/submit` (multipart) | Khusus Entrepreneur; field file `proof` (jpeg/png/pdf, ≤5MB) → milestone dengan `status: "VOTING"` |
+| 2 | `POST /milestones/:milestoneId/vote` | Khusus Investor; `{ choice: "APPROVE" \| "REJECT" }` → `{ milestoneId, choice, weight }` |
+
+**Catatan Penting:**
+- **`submit` membutuhkan *role* `ENTREPRENEUR` + KYC yang disetujui + status pemilik dari Proposal terkait.** `vote` membutuhkan *role* `INVESTOR` + KYC yang disetujui + pemanggil API harus sedang memiliki saham di Campaign tersebut (kalau tidak, akan muncul `403 Forbidden` — "You hold no shares in this campaign").
+- **Proses submit dibatasi oleh pendanaan penuh dan urutan yang ketat.** Campaign harus sudah mencapai target pendanaannya (`409 Conflict` — "Campaign has not reached its funding goal yet"), dan setiap milestone dengan *order* lebih rendah harus sudah berstatus `RELEASED` (`409 Conflict` — "A previous milestone has not been released yet").
+- **Kuorum memiliki mekanisme pengaman *default-approve*.** Jika kuorum tidak tercapai, jendela voting akan diperpanjang otomatis satu kali; jika masih belum tercapai setelah itu, milestone akan **disetujui secara otomatis** agar investor yang pasif tidak bisa menahan pencairan dana selamanya. Pertimbangkan untuk menampilkan hal ini di UI ("jika partisipasi tetap rendah, milestone ini akan otomatis disetujui setelah jendela voting yang diperpanjang berakhir").
+- **Voting ditutup tepat pada batas waktunya.** Suara yang dikirim setelah `votingEndsAt` akan mengembalikan `409 Conflict` — "Voting is not open for this milestone".
+- **Campaign yang dibatalkan (*cancelled*) akan membekukan kedua aksi tersebut.** Melakukan submit atau vote pada milestone milik Campaign berstatus `CANCELLED` akan mengembalikan `409 Conflict` — "Campaign has been cancelled" (lihat Flow 9).
+- **Cheat-sheet `MilestoneStatus`:** `DRAFT` (didefinisikan bersama Proposal, belum live) → `PENDING` (Campaign sudah live, menunggu submit) → `VOTING` (voting terbuka) → `APPROVED` (sudah dihitung, proses rilis sedang di-*enqueue* — sementara) → `RELEASING` (transaksi *on-chain* sedang diproses) → `RELEASED` (selesai) / `REJECTED` (voting gagal) / `FAILED` (error *on-chain*).
+
+---
+
+## Flow 9 — Admin: Cancel Campaign & Klaim Refund Investor
+
+Untuk sebuah Campaign yang bermasalah (penipuan, bisnis gagal, dsb.), seorang admin bisa membatalkannya (*cancel*). Aksi ini akan membekukan aktivitas *on-chain* lebih lanjut (`invest()` dan `release_milestone()` keduanya akan gagal/*revert* setelahnya) dan membuka proses pengembalian dana (*refund*) secara *pro-rata* dari **sisa dana yang masih tersimpan** (`raised − jumlah yang sudah dicairkan ke bisnis lewat milestone`) kembali ke para Investor. Proses ini tidak membutuhkan langkah *deposit* — uangnya sudah ada di dalam *contract* — namun selebihnya menggunakan pola relay *prepare* → *sign* → *submit* yang sama persis dengan klaim dividen (Flow 7).
+
+**Langkah-langkah:**
+1. *(Aksi admin, bukan aksi Investor)* — seorang admin membatalkan Campaign disertai alasan (*reason*).
+2. Lakukan *polling* `GET /campaigns/:campaignId/refund` hingga `status === "COMPLETED"` sebelum memberi tahu Investor bahwa refund sudah bisa di-*claim*. Proses ini asinkron: sebuah *background job* memanggil `cancel()` secara *on-chain*, mengambil *snapshot* kepemilikan saham, membangun *Merkle tree*, lalu mem-*posting* `set_refund()` secara *on-chain* — pola asinkron yang sama seperti distribusi dividen (Flow 6).
+3. Investor mengambil data `GET /refunds/mine` untuk menemukan hak (*entitlement*) miliknya + *Merkle proof*.
+4. Lakukan `prepare` sebuah klaim → *Wallet* menandatangani XDR-nya → `submit` → `status: "CLAIMED"`, USDC akan langsung masuk ke dalam *Wallet*.
+
+**Endpoints:**
+
+| Langkah | Method + Path | Body → Return |
+|---|---|---|
+| 2 | `GET /campaigns/:campaignId/refund` | Bersifat *public* → `Refund { id, campaignId, reason, totalAmount, totalShares, totalClaimed, merkleRoot, snapshotLedger, status, createdAt }`, atau `null` jika Campaign tersebut tidak pernah dibatalkan. |
+| 3 | `GET /refunds/mine` | `RefundClaim[] { id, refundId, shareAmount, amount, leafIndex, merkleProof, claimTxHash, status, claimedAt, createdAt, refund: { campaignId, status } }` |
+| 4 | `POST /refunds/:refundId/claim/prepare` | (tanpa body) → `{ refundId, xdr }` |
+| 4 | `POST /refunds/:refundId/claim` | `{ signedXdr }` → `RefundClaim { ..., status: "CLAIMED", claimTxHash, claimedAt }` |
+
+**Sisi Admin** (hanya jika Anda membangun UI admin): `POST /admin/campaigns/:id/cancel { reason }` (khusus admin, mengembalikan `200`) → mengembalikan data *Refund* yang baru saja dibuka. Perhatikan bahwa response ini **lebih ringkas** dibanding *endpoint* pembacaan di atas — hanya `{ id, campaignId, reason, status, createdAt }` (nilai total belum dihitung saat proses cancel berlangsung). Bersifat *idempotent*: memanggil ulang pada Campaign yang sudah dibatalkan hanya akan meng-*enqueue* ulang proses background dan mengembalikan data yang sudah ada. Akan mengembalikan `404` jika Campaign tidak ditemukan, atau `409 Conflict` jika Campaign sudah `CANCELLED`, sudah `COMPLETED`, atau belum live secara *on-chain* (`deployStatus !== "LIVE"`).
+
+**Catatan Penting:**
+- **`Campaign.status` berubah menjadi `CANCELLED` secara sinkron**, namun proses pembekuan *on-chain* dan perhitungan refund berjalan secara asinkron setelahnya. Sebelum `Refund.status === "COMPLETED"`, `claim/prepare` akan mengembalikan `409 Conflict` — "Refund is not ready to claim". Tampilkan status "refund sedang diproses", bukan tombol *claim*, selama masa ini.
+- **Nominal refund dihitung dari sisa dana yang tersimpan, bukan dari nilai investasi awal.** Perhitungannya *pro-rata* dari `raised − dana yang sudah dicairkan ke bisnis`, sehingga Investor pada Campaign yang sudah mencairkan beberapa milestone akan menerima kembali secara proporsional lebih kecil dari modal awalnya. Jelaskan hal ini secara eksplisit di *copywriting* UI — jangan sampai terkesan sebagai pengembalian dana penuh (*full refund*).
+- **Tidak ada batas waktu klaim**, sama seperti dividen — refund yang belum di-*claim* akan tetap bisa di-*claim* selamanya.
+- **Saham tidak dibakar (*burned*)** setelah klaim refund. Campaign yang sudah dibatalkan tidak akan menjalankan dividen atau pencairan milestone lagi, jadi hal ini tidak berdampak secara praktis — namun jangan membuat UI yang berasumsi saldo saham menjadi nol setelah klaim.
+- **Pembatalan Campaign juga membekukan milestone** — lihat mekanisme pembekuan Campaign yang dibatalkan pada Flow 8. Jika ada voting milestone yang sedang berjalan saat pembatalan terjadi, alihkan UI tersebut ke alur refund.
+- **`submit` pada klaim mengembalikan HTTP `201`** (default dari Nest), sedangkan `claim/prepare` secara eksplisit mengembalikan `200`. Jangan berasumsi keduanya `200` jika *client* Anda membedakan logika berdasarkan *status code*, bukan bentuk *payload*-nya.
+
+---
+
 ## Cheat-sheet Field Status
 
 Panduan tentang status apa saja yang perlu di-*polling* dan apa maknanya, berguna untuk menentukan *loading/empty states* di frontend.
@@ -215,10 +276,13 @@ Panduan tentang status apa saja yang perlu di-*polling* dan apa maknanya, bergun
 | KYC | `KycProfile.status` | `PENDING` (menunggu) → `APPROVED` (terbuka) / `REJECTED` / `REVOKED` (diblokir, harus *resubmit*) |
 | Proposal | `Proposal.status` | `DRAFT` (bisa diedit) → `SUBMITTED` → `UNDER_REVIEW` → `APPROVED` / `REJECTED` |
 | Campaign | `Campaign.deployStatus` | `PENDING`…`WIRING` ("sedang di-*deploy*") → `LIVE` (bisa digunakan) / `FAILED` |
-| Campaign | `Campaign.status` | `PENDING_DEPLOYMENT` → `ACTIVE` (siap untuk di-*invest*) → `LOCKED` / `GOAL_REACHED` / `COMPLETED` / `CANCELLED` |
+| Campaign | `Campaign.status` | `PENDING_DEPLOYMENT` → `ACTIVE` (siap untuk di-*invest*) → `LOCKED` / `GOAL_REACHED` / `COMPLETED` / `CANCELLED` (dibatalkan admin — cek `GET /campaigns/:id/refund` untuk status pencairan) |
 | Investment | `Investment.status` | `CONFIRMED` (proses *submit* berjalan sinkron; Anda akan sangat jarang melihat status `PENDING` / `FAILED`) |
 | Distribution | `ProfitDistribution.status` | `PENDING` (sedang membangun *Merkle tree* / mem-*posting* ke *on-chain* — akses *claim* belum siap) → `COMPLETED` (bisa di-*claim*) / `FAILED` |
 | Claim | `DistributionClaim.status` | `PENDING` (bisa di-*claim*, tampilkan tombolnya) → `CLAIMED` (selesai) |
+| Milestone | `Milestone.status` | `DRAFT`/`PENDING` (belum di-*submit*) → `VOTING` (tampilkan UI voting) → `APPROVED`/`RELEASING` (sementara) → `RELEASED` (selesai) / `REJECTED` / `FAILED` |
+| Refund | `Refund.status` | `PENDING` (proses pembatalan berjalan, belum bisa di-*claim*) → `COMPLETED` (siap di-*claim*) / `FAILED` |
+| Refund Claim | `RefundClaim.status` | `PENDING` (bisa di-*claim*, tampilkan tombolnya) → `CLAIMED` (selesai) |
 
 ## Konvensi Error Handling
 

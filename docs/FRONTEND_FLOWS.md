@@ -91,7 +91,7 @@ This process is entirely off-chain (no smart contracts involved yet). All write 
 
 | Step | Method + Path | Notes |
 |---|---|---|
-| 1 | `POST /proposals` | `{ businessName, businessDescription, category, location?, requestedAmount, lockPeriodDays }` → Returns the Proposal (`DRAFT`) |
+| 1 | `POST /proposals` | `{ businessName, businessDescription, category, location?, requestedAmount, lockPeriodDays, milestones }` → Returns the Proposal (`DRAFT`) |
 | 2 | `PATCH /proposals/:id` | Accepts any subset of the fields above; **only allowed while in `DRAFT` state**. |
 | 3 | `POST /proposals/:id/submit` | Updates status: `DRAFT → SUBMITTED`. |
 | 4 | `GET /proposals` / `GET /proposals/:id` | Returns only the caller's own Proposals (`404` if it belongs to someone else). |
@@ -99,6 +99,7 @@ This process is entirely off-chain (no smart contracts involved yet). All write 
 **Caveats:**
 - **`requestedAmount` must be a string** (e.g., `"1500.5000000"`, up to 7 decimals). Never send a standard JS `number` for financial values anywhere in this API.
 - **`lockPeriodDays` is an integer between 1–3650**. This dictates the on-chain principal-lock duration after deployment. Ensure the UI clarifies this ("Principal will be locked for X days after the Campaign goes live").
+- **`milestones` is required** — an array of `{ order, title, description, amount }`. `order` must start at 1 and be contiguous integers; each `amount` is a money string; all `amount`s must sum **exactly** to `requestedAmount` (validated server-side, `400` on mismatch). These become the on-chain staged-release schedule — see Flow 8 (Milestone Submission & Voting). `PATCH /proposals/:id` can replace the whole milestone set while still `DRAFT`.
 - **`SUBMITTED` state is read-only** for the Entrepreneur. Poll `GET /proposals/:id` and watch the `status` transition to `UNDER_REVIEW` → `APPROVED` / `REJECTED`.
 
 ---
@@ -206,6 +207,66 @@ This utilizes the Relay Pattern. It requires the `INVESTOR` role + approved KYC.
 
 ---
 
+## Flow 8 — Milestone Submission & Investor Voting
+
+Milestones govern **staged release of the raised principal** — distinct from Flow 6/7, which cover profit dividends. They are authored up front with the Proposal (Flow 3): each has an `order`, `title`, `description`, and `amount`, and the amounts sum exactly to `requestedAmount`. A milestone starts `DRAFT`, flips to `PENDING` once the Campaign deploys, and then progresses through voting as the business executes.
+
+**Steps:**
+1. Once the Campaign has reached its funding goal, the Entrepreneur submits the next sequential milestone (multipart, with a proof-of-progress file) → opens a voting window (7 days by default).
+2. Investors cast a weighted ballot (`APPROVE`/`REJECT`) — weight is their current share balance. They may change their vote any time before the window closes.
+3. When the window closes, a background job tallies the result: **quorum** (30% of the total share supply, snapshotted when voting opened) **and majority** (>50% of cast weight) are both required to approve. On approval, the backend asynchronously drives the on-chain `release_milestone()`.
+4. Poll the milestone's `status` until it reaches `RELEASED`.
+
+**Endpoints:**
+
+| Step | Method + Path | Body → Returns |
+|---|---|---|
+| - | `GET /milestones?campaignId=<uuid>` | Lists a Campaign's milestones, ordered (public read). |
+| - | `GET /milestones/:milestoneId` | Detail + running vote tally + the caller's own vote + a presigned `proofUrl`. |
+| 1 | `POST /milestones/:milestoneId/submit` (multipart) | Entrepreneur only; file field `proof` (jpeg/png/pdf, ≤5MB) → milestone with `status: "VOTING"` |
+| 2 | `POST /milestones/:milestoneId/vote` | Investor only; `{ choice: "APPROVE" \| "REJECT" }` → `{ milestoneId, choice, weight }` |
+
+**Caveats:**
+- **`submit` requires the `ENTREPRENEUR` role + approved KYC + ownership of the underlying Proposal.** `vote` requires the `INVESTOR` role + approved KYC + that the caller currently holds shares in the Campaign (`403 Forbidden` — "You hold no shares in this campaign" — otherwise).
+- **Submission is gated on full funding and strict order.** The Campaign must have reached its goal (`409 Conflict` — "Campaign has not reached its funding goal yet"), and every lower-order milestone must already be `RELEASED` (`409 Conflict` — "A previous milestone has not been released yet").
+- **Quorum has a default-approve safety net.** If quorum is missed, the voting window auto-extends once; if it's still missed after that, the milestone **auto-approves** so a passive electorate can't block fund release indefinitely. Consider surfacing this in the UI ("if turnout stays low, this milestone will be approved automatically after the extended window").
+- **Voting closes exactly at the deadline.** A vote submitted after `votingEndsAt` returns `409 Conflict` — "Voting is not open for this milestone".
+- **A cancelled Campaign freezes both actions.** Submitting or voting on a `CANCELLED` Campaign's milestone returns `409 Conflict` — "Campaign has been cancelled" (see Flow 9).
+- **`MilestoneStatus` cheat-sheet:** `DRAFT` (authored with the Proposal, not yet live) → `PENDING` (Campaign live, awaiting submission) → `VOTING` (ballot open) → `APPROVED` (tallied, release enqueuing — transient) → `RELEASING` (on-chain tx pending) → `RELEASED` (done) / `REJECTED` (vote failed) / `FAILED` (on-chain error).
+
+---
+
+## Flow 9 — Admin: Cancel a Campaign & Investor Refund Claim
+
+For a problematic Campaign (fraud, business failure, etc.), an admin can cancel it. This freezes further on-chain activity (`invest()` and `release_milestone()` both revert afterward) and opens a pro-rata refund of the **remaining custody** (`raised − amount already released to the business via milestones`) back to Investors. It needs no deposit step — the money is already in the contract — but otherwise reuses the exact same prepare → sign → submit relay shape as dividend claims (Flow 7).
+
+**Steps:**
+1. *(Admin action, not Investor-facing)* — an admin cancels the Campaign with a reason.
+2. Poll `GET /campaigns/:campaignId/refund` until `status === "COMPLETED"` before telling Investors a refund is claimable. This is async: a background job calls on-chain `cancel()`, snapshots holdings, builds a Merkle tree, then posts `set_refund()` on-chain — the same async shape as dividend distribution (Flow 6).
+3. The Investor fetches `GET /refunds/mine` to find their entitlement + Merkle proof.
+4. `prepare` a claim → Wallet signs the XDR → `submit` → `status: "CLAIMED"`, USDC lands directly in the Wallet.
+
+**Endpoints:**
+
+| Step | Method + Path | Body → Returns |
+|---|---|---|
+| 2 | `GET /campaigns/:campaignId/refund` | Public → `Refund { id, campaignId, reason, totalAmount, totalShares, totalClaimed, merkleRoot, snapshotLedger, status, createdAt }`, or `null` if the Campaign was never cancelled. |
+| 3 | `GET /refunds/mine` | `RefundClaim[] { id, refundId, shareAmount, amount, leafIndex, merkleProof, claimTxHash, status, claimedAt, createdAt, refund: { campaignId, status } }` |
+| 4 | `POST /refunds/:refundId/claim/prepare` | (No body) → `{ refundId, xdr }` |
+| 4 | `POST /refunds/:refundId/claim` | `{ signedXdr }` → `RefundClaim { ..., status: "CLAIMED", claimTxHash, claimedAt }` |
+
+**Admin Side** (only if you are building the Admin UI): `POST /admin/campaigns/:id/cancel { reason }` (admin-only, returns `200`) → returns the newly opened `Refund` row. Note this response is a **smaller shape** than the read endpoint above — just `{ id, campaignId, reason, status, createdAt }` (the totals aren't computed yet at cancel time). It's idempotent: re-calling on an already-cancelled Campaign just re-enqueues the background job and returns the existing row. Throws `404` if the Campaign doesn't exist, or `409 Conflict` if it's already `CANCELLED`, already `COMPLETED`, or not yet live on-chain (`deployStatus !== "LIVE"`).
+
+**Caveats:**
+- **`Campaign.status` flips to `CANCELLED` synchronously**, but the on-chain freeze and refund computation happen asynchronously afterward. Before `Refund.status === "COMPLETED"`, `claim/prepare` throws `409 Conflict` — "Refund is not ready to claim". Show a "refund is being processed" state, not a claim button, in the interim.
+- **The refund amount is based on remaining custody, not the original investment.** It's split pro-rata over `raised − already released to the business`, so an Investor whose Campaign had already released several milestones gets back proportionally less than their full principal. Make this explicit in the UI copy — do not imply a full refund.
+- **No claim expiration**, same as dividends — unclaimed refunds remain claimable indefinitely.
+- **Shares are not burned** after a refund claim. A cancelled Campaign runs no further dividends or milestone releases, so this has no practical effect, but don't build UI that assumes the share balance zeroes out after claiming.
+- **Cancellation freezes milestones too** — see Flow 8's cancelled-Campaign guard. If a milestone vote is in flight when a cancellation happens, switch that UI to the refund flow.
+- **`claim` submit returns HTTP `201`** (Nest's default), while `claim/prepare` explicitly returns `200`. Don't assume both are `200` if your client branches on status code rather than payload shape.
+
+---
+
 ## Status Field Cheat-Sheet
 
 A quick reference for what to poll and what each status means (highly useful for managing loading and empty states in the UI).
@@ -215,10 +276,13 @@ A quick reference for what to poll and what each status means (highly useful for
 | KYC | `KycProfile.status` | `PENDING` (wait) → `APPROVED` (unlocked) / `REJECTED` / `REVOKED` (blocked, prompt resubmit) |
 | Proposal | `Proposal.status` | `DRAFT` (editable) → `SUBMITTED` → `UNDER_REVIEW` → `APPROVED` / `REJECTED` |
 | Campaign | `Campaign.deployStatus` | `PENDING`…`WIRING` (show loading state) → `LIVE` (ready to use) / `FAILED` |
-| Campaign | `Campaign.status` | `PENDING_DEPLOYMENT` → `ACTIVE` (ready for investment) → `LOCKED` / `GOAL_REACHED` / `COMPLETED` / `CANCELLED` |
+| Campaign | `Campaign.status` | `PENDING_DEPLOYMENT` → `ACTIVE` (ready for investment) → `LOCKED` / `GOAL_REACHED` / `COMPLETED` / `CANCELLED` (admin-cancelled — check `GET /campaigns/:id/refund` for payout status) |
 | Investment | `Investment.status` | `CONFIRMED` (submit is synchronous; you will rarely ever see `PENDING` or `FAILED`) |
 | Distribution | `ProfitDistribution.status` | `PENDING` (building Merkle tree/posting on-chain — claims are not ready yet) → `COMPLETED` (ready to claim) / `FAILED` |
 | Claim | `DistributionClaim.status` | `PENDING` (claimable, show the button) → `CLAIMED` (done) |
+| Milestone | `Milestone.status` | `DRAFT`/`PENDING` (not yet submitted) → `VOTING` (show ballot UI) → `APPROVED`/`RELEASING` (transient) → `RELEASED` (done) / `REJECTED` / `FAILED` |
+| Refund | `Refund.status` | `PENDING` (cancellation in progress, not claimable yet) → `COMPLETED` (ready to claim) / `FAILED` |
+| Refund Claim | `RefundClaim.status` | `PENDING` (claimable, show the button) → `CLAIMED` (done) |
 
 ## Error Handling Conventions
 
