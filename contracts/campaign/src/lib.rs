@@ -11,6 +11,11 @@
 //!     `set_distribution(id, root)` posts a Merkle root; `claim(id, …, proof)`
 //!     verifies the proof on-chain and pays the entitled holder. Pull-based and
 //!     Merkle-pinned, so the backend cannot forge claim amounts.
+//!   * **Refund** — if a funded campaign turns out problematic, the owner
+//!     `cancel()`s it (freezing `invest()` + `release_milestone()`) and posts a
+//!     refund root via `set_refund(root)`; investors `refund_claim(…, proof)` to
+//!     pull back their pro-rata share of the remaining custody. Same Merkle scheme
+//!     as distributions, so amounts stay unforgeable.
 
 mod merkle;
 
@@ -49,6 +54,11 @@ pub enum CampaignError {
     MilestoneSumMismatch = 8,
     FundingIncomplete = 9,
     MilestoneOutOfOrder = 10,
+    CampaignCancelled = 11,
+    NotCancelled = 12,
+    RefundExists = 13,
+    RefundMissing = 14,
+    AlreadyRefunded = 15,
 }
 
 #[contracttype]
@@ -65,6 +75,9 @@ enum DataKey {
     NextMilestone,     // u32 index of the next releasable milestone (sequential gate)
     Root(u32),         // merkle root per distribution id
     Claimed(u32, u32), // (distribution id, leaf index) -> claimed
+    Cancelled,         // bool; set by cancel(), freezes invest() + release_milestone()
+    RefundRoot,        // merkle root for the single per-campaign refund
+    Refunded(u32),     // refund leaf index -> claimed
 }
 
 /// A dividend entitlement leaf. Its SHA-256(XDR) is a Merkle leaf. `index`
@@ -101,6 +114,18 @@ struct Claimed {
 #[contractevent(topics = ["campaign", "milestone"])]
 struct MilestoneReleased {
     index: u32,
+    amount: i128,
+}
+
+#[contractevent(topics = ["campaign", "cancel"])]
+struct Cancelled {
+    ledger: u32,
+}
+
+#[contractevent(topics = ["campaign", "refund"])]
+struct RefundClaimed {
+    #[topic]
+    claimant: Address,
     amount: i128,
 }
 
@@ -152,6 +177,9 @@ impl Campaign {
     /// custody and mints shares 1:1. `investor` authorizes the call.
     pub fn invest(e: &Env, investor: Address, amount: i128) {
         investor.require_auth();
+        if Self::cancelled(e) {
+            panic_with_error!(e, CampaignError::CampaignCancelled);
+        }
         if amount <= 0 {
             panic_with_error!(e, CampaignError::InvalidAmount);
         }
@@ -174,6 +202,9 @@ impl Campaign {
     /// platform can only ever hand over the pinned milestone chunks, in order.
     #[only_owner]
     pub fn release_milestone(e: &Env, index: u32) {
+        if Self::cancelled(e) {
+            panic_with_error!(e, CampaignError::CampaignCancelled);
+        }
         if Self::raised(e) < Self::goal(e) {
             panic_with_error!(e, CampaignError::FundingIncomplete);
         }
@@ -207,6 +238,19 @@ impl Campaign {
     #[only_owner]
     pub fn unlock(e: &Env) {
         ShareClient::new(e, &Self::token(e)).set_lock(&false);
+    }
+
+    /// Cancel a problematic campaign (owner-only). Freezes `invest()` and
+    /// `release_milestone()` so no new money comes in and no more principal leaves to
+    /// the business, after which the platform posts a refund root via `set_refund()`.
+    /// Idempotent — re-cancelling is a no-op, so orchestrator retries are safe.
+    #[only_owner]
+    pub fn cancel(e: &Env) {
+        e.storage().instance().set(&DataKey::Cancelled, &true);
+        Cancelled {
+            ledger: e.ledger().sequence(),
+        }
+        .publish(e);
     }
 
     /// Deposit profit (USDC) into custody for a future distribution. Anyone may
@@ -284,6 +328,66 @@ impl Campaign {
         .publish(e);
     }
 
+    /// Post the Merkle root for the refund (owner-only, once). Requires the campaign
+    /// to be cancelled first. Mirrors `set_distribution`, but there is a single refund
+    /// root per campaign, whose leaf `amount`s are each holder's pro-rata share of the
+    /// remaining custody (`raised - released`).
+    #[only_owner]
+    pub fn set_refund(e: &Env, merkle_root: BytesN<32>) {
+        if !Self::cancelled(e) {
+            panic_with_error!(e, CampaignError::NotCancelled);
+        }
+        if e.storage().persistent().has(&DataKey::RefundRoot) {
+            panic_with_error!(e, CampaignError::RefundExists);
+        }
+        e.storage()
+            .persistent()
+            .set(&DataKey::RefundRoot, &merkle_root);
+    }
+
+    /// Claim a refund at leaf `index`. Verifies the Merkle proof against the posted
+    /// refund root and pays `amount` USDC to `claimant`. Each index is claimable once.
+    /// Mirrors `claim` (same `DistributionLeaf` leaf encoding), without a distribution
+    /// id — there is one refund root per campaign. No whitelist gate: the investor is
+    /// simply pulling their own principal back.
+    pub fn refund_claim(
+        e: &Env,
+        index: u32,
+        claimant: Address,
+        amount: i128,
+        proof: Vec<BytesN<32>>,
+    ) {
+        claimant.require_auth();
+
+        let root: BytesN<32> = match e.storage().persistent().get(&DataKey::RefundRoot) {
+            Some(r) => r,
+            None => panic_with_error!(e, CampaignError::RefundMissing),
+        };
+
+        let claimed_key = DataKey::Refunded(index);
+        if e.storage().persistent().get(&claimed_key).unwrap_or(false) {
+            panic_with_error!(e, CampaignError::AlreadyRefunded);
+        }
+
+        let leaf = DistributionLeaf {
+            index,
+            address: claimant.clone(),
+            amount,
+        };
+        let leaf_hash = e.crypto().sha256(&leaf.to_xdr(e)).to_bytes();
+        if !merkle::verify_proof(e, &root, leaf_hash, &proof) {
+            panic_with_error!(e, CampaignError::InvalidProof);
+        }
+
+        e.storage().persistent().set(&claimed_key, &true);
+        token::TokenClient::new(e, &Self::usdc(e)).transfer(
+            &e.current_contract_address(),
+            &claimant,
+            &amount,
+        );
+        RefundClaimed { claimant, amount }.publish(e);
+    }
+
     // ---- getters (off-chain mirror reads these) ----
     pub fn raised(e: &Env) -> i128 {
         e.storage().instance().get(&DataKey::Raised).unwrap_or(0)
@@ -314,6 +418,12 @@ impl Campaign {
             .instance()
             .get(&DataKey::NextMilestone)
             .unwrap_or(0)
+    }
+    pub fn cancelled(e: &Env) -> bool {
+        e.storage()
+            .instance()
+            .get(&DataKey::Cancelled)
+            .unwrap_or(false)
     }
 
     fn require_whitelisted(e: &Env, addr: &Address) {

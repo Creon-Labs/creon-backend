@@ -78,7 +78,7 @@ pair is deployed per approved campaign. The backend's single platform key is the
 |---|---|---|
 | [`compliance-registry`](./compliance-registry) | singleton | KYC whitelist: `add` / `remove` / `is_whitelisted`, owner-gated and **idempotent** (re-adds are no-ops → safe retries). The backend (platform key = owner) is the only writer, so the website is the sole path onto the whitelist. |
 | [`share-token`](./share-token) | per-campaign | Restricted SEP-41 share token on the OpenZeppelin `stellar-tokens` `Base`. `mint` is minter-only (the `Campaign`) and requires a whitelisted recipient; `transfer` / `transfer_from` require the recipient whitelisted **and** the token unlocked. Starts **locked**; shares are **non-burnable**. |
-| [`campaign`](./campaign) | per-campaign | Merged vault + lifecycle + distribution: `invest` (whitelist-gated USDC custody + 1:1 mint), `release_milestone(index)` (sequential, once-only, gated on full funding), `unlock`, `deposit_profit`, `set_distribution(merkle_root)`, `claim(proof)` with on-chain Merkle verification. |
+| [`campaign`](./campaign) | per-campaign | Merged vault + lifecycle + distribution: `invest` (whitelist-gated USDC custody + 1:1 mint), `release_milestone(index)` (sequential, once-only, gated on full funding), `unlock`, `deposit_profit`, `set_distribution(merkle_root)`, `claim(proof)` with on-chain Merkle verification, and a refund path — `cancel` (freezes `invest`/`release_milestone`), `set_refund(merkle_root)`, `refund_claim(proof)` — that returns remaining custody pro-rata. |
 
 Folding vault + distribution into `Campaign` cuts per-campaign deploys from three
 instances to two.
@@ -115,12 +115,15 @@ forged Merkle proof on `claim()` is rejected — passed on-chain against these
 artifacts. Per-campaign `ShareToken` + `Campaign` instances are deployed from the
 uploaded WASM hashes by the backend (Phase 2 orchestration).
 
-> **Note on the milestone release:** the staged `release_milestone(index)` feature
-> (Phase 7) is implemented and unit-tested, but changed the `Campaign` constructor
-> signature (it gained `milestone_amounts: Vec<i128>`). The recorded `Campaign` WASM
-> hash above is the pre-milestone build; a `stellar contract build` + re-upload is
-> pending before milestone-enabled campaigns go on-chain. Existing testnet campaigns
-> keep running under the deployed WASM.
+> **Note on the milestone release + refund:** the staged `release_milestone(index)`
+> feature (Phase 7) is implemented and unit-tested, but changed the `Campaign`
+> constructor signature (it gained `milestone_amounts: Vec<i128>`). The recorded
+> `Campaign` WASM hash above is the pre-milestone build; a `stellar contract build` +
+> re-upload is pending before milestone-enabled campaigns go on-chain. The **refund
+> path** (`cancel`, `set_refund`, `refund_claim` + the `invest`/`release_milestone`
+> freeze guards) is implemented and unit-tested too, and ships in that same pending
+> re-upload — no separate deploy. Existing testnet campaigns keep running under the
+> deployed WASM.
 
 ## Toolchain
 

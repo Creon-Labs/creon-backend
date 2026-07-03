@@ -290,6 +290,110 @@ fn claim_before_distribution_set_reverts() {
         .is_err());
 }
 
+/// Two whitelisted investors fund custody (alice 600, bob 400) with no release, so
+/// remaining custody == raised == 1000 — the pot a refund pays back pro-rata.
+fn fund_two(f: &F) -> (Address, Address) {
+    let alice = Address::generate(&f.e);
+    let bob = Address::generate(&f.e);
+    f.registry.add(&alice);
+    f.registry.add(&bob);
+    f.usdc_admin.mint(&alice, &600);
+    f.usdc_admin.mint(&bob, &400);
+    f.campaign.invest(&alice, &600);
+    f.campaign.invest(&bob, &400);
+    (alice, bob)
+}
+
+#[test]
+fn cancel_freezes_invest_and_release() {
+    let f = setup();
+    fund_to_goal(&f); // fully funded, so release would otherwise be allowed
+
+    f.campaign.cancel();
+    assert!(f.campaign.cancelled());
+
+    // No new investment once cancelled.
+    let mallory = Address::generate(&f.e);
+    f.registry.add(&mallory);
+    f.usdc_admin.mint(&mallory, &500);
+    assert!(f.campaign.try_invest(&mallory, &500).is_err());
+    assert_eq!(f.campaign.raised(), GOAL);
+
+    // No milestone release once cancelled.
+    assert!(f.campaign.try_release_milestone(&0u32).is_err());
+    assert_eq!(f.campaign.released(), 0);
+}
+
+#[test]
+fn set_refund_requires_cancel_and_is_once_only() {
+    let f = setup();
+    let (alice, bob) = fund_two(&f);
+
+    let ha = leaf_hash(&f.e, 0, &alice, 600);
+    let hb = leaf_hash(&f.e, 1, &bob, 400);
+    let root = crate::merkle::hash_pair(&f.e, &ha, &hb);
+
+    // Cannot post a refund root before the campaign is cancelled.
+    assert!(f.campaign.try_set_refund(&root).is_err());
+
+    f.campaign.cancel();
+    f.campaign.set_refund(&root);
+    // One root only — a second post is rejected.
+    assert!(f.campaign.try_set_refund(&root).is_err());
+}
+
+#[test]
+fn refund_claim_valid_proof_pays_rejects_forged_and_double() {
+    let f = setup();
+    let (alice, bob) = fund_two(&f);
+    assert_eq!(f.usdc.balance(&f.camp_id), 1_000); // custody to refund
+
+    f.campaign.cancel();
+
+    // Refund tree: alice idx0 -> 600, bob idx1 -> 400 (pro-rata of remaining custody).
+    let ha = leaf_hash(&f.e, 0, &alice, 600);
+    let hb = leaf_hash(&f.e, 1, &bob, 400);
+    let root = crate::merkle::hash_pair(&f.e, &ha, &hb);
+    f.campaign.set_refund(&root);
+
+    // Alice claims with the valid proof [hb].
+    let proof_a = Vec::from_array(&f.e, [hb.clone()]);
+    f.campaign.refund_claim(&0u32, &alice, &600i128, &proof_a);
+    assert_eq!(f.usdc.balance(&alice), 600);
+
+    // Double-claim is rejected.
+    assert!(f
+        .campaign
+        .try_refund_claim(&0u32, &alice, &600i128, &proof_a)
+        .is_err());
+
+    // Forged proof (random sibling) is rejected.
+    let forged = Vec::from_array(&f.e, [BytesN::from_array(&f.e, &[9u8; 32])]);
+    assert!(f
+        .campaign
+        .try_refund_claim(&1u32, &bob, &400i128, &forged)
+        .is_err());
+
+    // Bob's correct claim succeeds and drains the custody.
+    let proof_b = Vec::from_array(&f.e, [ha.clone()]);
+    f.campaign.refund_claim(&1u32, &bob, &400i128, &proof_b);
+    assert_eq!(f.usdc.balance(&bob), 400);
+    assert_eq!(f.usdc.balance(&f.camp_id), 0);
+}
+
+#[test]
+fn refund_claim_before_set_refund_reverts() {
+    let f = setup();
+    let (alice, _bob) = fund_two(&f);
+    f.campaign.cancel();
+
+    let proof = Vec::from_array(&f.e, [BytesN::from_array(&f.e, &[1u8; 32])]);
+    assert!(f
+        .campaign
+        .try_refund_claim(&0u32, &alice, &1i128, &proof)
+        .is_err());
+}
+
 /// Prints a reproducible test vector (fixed addresses) so the Phase-6 TypeScript
 /// Merkle builder can assert byte-identical leaf hashes + root. Run with
 /// `cargo test -p campaign print_merkle_test_vector -- --nocapture`.
