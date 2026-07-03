@@ -19,10 +19,14 @@ claim flow** (Merkle snapshots) are built. The Soroban contracts
 `ShareToken` + `Campaign` on proposal approval and syncs KYC approvals into the
 on-chain whitelist — both as idempotent BullMQ orchestrators. Dividends: the business
 deposits profit (relay), a BullMQ orchestrator snapshots holdings → builds a Merkle
-tree → posts `set_distribution`, and investors `claim()` (relay). See
-`docs/ARCHITECTURE.md` (roadmap) and `docs/SMART_CONTRACT_PLAN.md` (phased plan) —
-Phases 1–6 are done. Remaining work is on-chain e2e (needs a funded
-`STELLAR_PLATFORM_SECRET`) and post-hackathon hardening.
+tree → posts `set_distribution`, and investors `claim()` (relay). **Milestone-based
+staged release** (hybrid on-chain `release_milestone` + off-chain weighted voting) and
+an **admin-triggered refund/cancellation** flow (dedicated on-chain
+`cancel`/`set_refund`/`refund_claim`) are also built — both on `dev`, both awaiting the
+pending `Campaign` WASM re-upload before on-chain e2e. See `docs/ARCHITECTURE.md`
+(roadmap) and `docs/SMART_CONTRACT_PLAN.md` (phased plan) — Phases 1–6 are done.
+Remaining work is on-chain e2e (needs a funded `STELLAR_PLATFORM_SECRET`) and
+post-hackathon hardening.
 
 ## Commands
 
@@ -95,7 +99,8 @@ NestJS module-per-domain. `app.module.ts` wires: `ConfigModule` (global),
 Valkey/BullMQ connection + `defaultJobOptions`: 5 attempts, exponential 5 s backoff,
 `removeOnComplete`), then `PrismaModule` (global), `StorageModule`, `CacheModule`
 (global), `SorobanModule`, `AuthModule`, `KycModule`, `AdminModule`,
-`ProposalModule`, `CampaignModule`, `InvestmentModule`, `IndexerModule`. `main.ts`
+`ProposalModule`, `CampaignModule`, `InvestmentModule`, `IndexerModule`,
+`HoldingModule`, `DistributionModule`, `MilestoneModule`, `RefundModule`. `main.ts`
 installs a global `ValidationPipe`
 (`whitelist + transform`) and a `BigInt.prototype.toJSON` patch so Prisma
 ledger-sequence fields serialize to JSON.
@@ -153,14 +158,15 @@ ledger-sequence fields serialize to JSON.
 **On-chain integration** (`src/soroban/`, `src/campaign/`, `src/kyc/kyc-whitelist.*`):
 - `SorobanService` — thin wrapper over `@stellar/stellar-sdk`'s Soroban RPC +
   tx-building surface, same env-configured `@Injectable` pattern as the other infra
-  wrappers. Every platform tx (deploys, `set_minter`, `registry.add/remove`) is
+  wrappers. Every platform tx (deploys, `set_minter`, `registry.add/remove`,
+  `release_milestone`, `cancel`/`set_refund`) is
   signed by the single `STELLAR_PLATFORM_SECRET` key, which is the `owner` of every
   contract; the keypair is built **lazily** so the app boots without it for non-chain
   work. Deploys are **idempotent**: a deterministic per-`(campaign, kind)` salt plus
   an on-chain pre-check (`contractExists`) means a retry recovers the same address
   instead of duplicating.
-- **Three BullMQ orchestrators, one shared shape.** `campaign-deploy`,
-  `kyc-whitelist`, and `distribution` each have: a `*Service` that is an idempotent,
+- **Five BullMQ orchestrators, one shared shape.** `campaign-deploy`,
+  `kyc-whitelist`, `distribution`, `milestone-release`, and `refund` each have: a `*Service` that is an idempotent,
   resumable state machine (`drive()`), a thin `*Processor` (`WorkerHost`) that just calls `drive()`
   (a throw fails the job → BullMQ retries with backoff), and a **reconcile loop**
   (`@Interval` every 5 min **and** `onApplicationBootstrap`) that re-enqueues any
@@ -190,6 +196,27 @@ ledger-sequence fields serialize to JSON.
   (`print_merkle_test_vector` in `contracts/campaign/src/test.rs`); the leaf `ScVal`
   map is keyed `address` < `amount` < `index`. Unclaimed dividends stay claimable
   indefinitely (the contract has no reclaim path).
+- Milestone release orchestrator (`src/milestone/`, `MilestoneStatus`): once a
+  milestone vote settles APPROVED (see the off-chain voting service), the on-chain
+  `release_milestone(index)` is enqueued and driven `APPROVED → RELEASING → RELEASED`
+  (resume derived from `releaseTxHash`), bumping the vault's `releasedToBusiness`. The
+  contract enforces sequential once-only release, so a duplicate reverts
+  `MilestoneOutOfOrder` — treated as "already released". A CANCELLED campaign is
+  skipped (its contract is frozen — see refunds below).
+- Refund orchestrator (`src/refund/`, `RefundStatus`): the refund/cancellation path
+  for a problematic **funded** campaign. Admin `POST /admin/campaigns/:id/cancel
+  {reason}` flips the campaign CANCELLED **and** opens a `Refund` row in one tx
+  (mirrors proposal approval), then enqueues `drive()`: `cancel()` on-chain (which
+  **freezes `invest()` + `release_milestone()`**) → snapshot `TokenHolding` →
+  integer-floor pro-rata over the **remaining custody** (`raised − released`, read
+  on-chain, so Σ ≤ actual custody even if the mirror drifted) → build a refund Merkle
+  tree (**reuses `src/distribution/merkle.util.ts` and the contract's `DistributionLeaf`
+  encoding verbatim**) → persist one `RefundClaim` per holder → `set_refund(root)`
+  on-chain → COMPLETED. Investors `refund_claim()` via the same relay shape (no deposit
+  step — the money is the principal already in custody; idempotent on `claim_tx_hash`).
+  Shares are **not** burned (a CANCELLED campaign runs no further dividends/milestones).
+  The milestone services carry CANCELLED guards so no work is driven against a frozen
+  contract.
 
 **Ownership indexer** (`src/indexer/`, `TokenHoldingIndexerService`) — the one
 non-BullMQ loop: a plain `@Interval` (+ `onApplicationBootstrap`) poll, since there's
@@ -208,9 +235,10 @@ are wired into the backend via `COMPLIANCE_REGISTRY_ADDRESS`, `SHARE_TOKEN_WASM_
 `CAMPAIGN_WASM_HASH`, `USDC_CONTRACT_ADDRESS`, `STELLAR_*` (see `.env.example`).
 Three crates: `compliance-registry` (owner-gated KYC whitelist singleton),
 `share-token` (per-campaign restricted SEP-41), `campaign` (merged vault + lifecycle
-+ Merkle-proof dividend distribution). See `contracts/README.md`.
++ Merkle-proof dividend distribution + milestone release + refund-on-cancel). See
+`contracts/README.md`.
 
-**Data model** (`prisma/schema.prisma`): 11 models + 11 enums. DB columns are
+**Data model** (`prisma/schema.prisma`): 15 models + 15 enums. DB columns are
 snake_case via `@map`; timestamps are `@db.Timestamptz`. The DB is an **off-chain
 mirror** of on-chain state — it stores contract addresses + tx hashes, with
 `tx_hash` unique for idempotent reconciliation. Money is `Decimal(28,7)` (Stellar's

@@ -79,6 +79,19 @@ tags:
       `release_milestone(index)` is enqueued automatically; a missed quorum extends
       the window once and then defaults to approved. No route triggers the on-chain
       release directly — it always runs through the orchestrator once a vote settles.
+  - name: refunds
+    description: |
+      Refunds for cancelled campaigns. When an admin cancels a problematic funded
+      campaign (`POST /admin/campaigns/{id}/cancel`), the backend freezes the
+      contract on-chain (`cancel()` — no further invest or milestone release),
+      snapshots current share ownership, splits the **remaining custody**
+      (`raised − released`) integer-floor pro-rata, and posts a **refund Merkle
+      root** on-chain (`set_refund`). Investors then pull their principal with the
+      same prepare → sign → submit relay as a dividend claim, calling
+      `refund_claim()` — the contract verifies each Merkle proof, so the backend
+      cannot forge amounts. There is no deposit step (the money is the principal
+      already in custody); unclaimed refunds remain claimable indefinitely (no
+      on-chain reclaim).
 
 components:
   securitySchemes:
@@ -121,7 +134,7 @@ components:
         - `LOCKED` – capital locked (principal + share transfer)
         - `GOAL_REACHED` – funding goal met
         - `COMPLETED` – campaign settled
-        - `CANCELLED` – campaign cancelled
+        - `CANCELLED` – admin cancelled a problematic campaign; the contract is frozen (no more invest / milestone release) and a pro-rata refund of the remaining custody is opened
 
     InvestmentStatus:
       type: string
@@ -145,6 +158,22 @@ components:
       description: |
         - `PENDING` – entitlement computed; not yet claimed on-chain
         - `CLAIMED` – the `claim()` tx succeeded and USDC was paid to the holder
+        - `FAILED` – the claim did not complete
+
+    RefundStatus:
+      type: string
+      enum: [PENDING, COMPLETED, FAILED]
+      description: |
+        - `PENDING` – campaign cancelled; the on-chain `cancel()` + snapshot + `set_refund` steps are not yet complete
+        - `COMPLETED` – contract frozen, remaining custody snapshotted, claims persisted, and `set_refund` posted on-chain (claimable)
+        - `FAILED` – the refund orchestrator errored (retried with backoff)
+
+    RefundClaimStatus:
+      type: string
+      enum: [PENDING, CLAIMED, FAILED]
+      description: |
+        - `PENDING` – entitlement computed; not yet claimed on-chain
+        - `CLAIMED` – the `refund_claim()` tx succeeded and the principal was returned to the holder
         - `FAILED` – the claim did not complete
 
     MilestoneStatus:
@@ -419,6 +448,28 @@ components:
             or `claim()` XDR returned by the matching `prepare` endpoint, signed by the wallet.
           example: AAAAAgAAAAA...
 
+    CancelCampaignRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Why the campaign is being cancelled — surfaced to investors alongside the refund
+          example: Bisnis gagal memenuhi milestone; dana dikembalikan ke investor.
+
+    SubmitRefundClaimRequest:
+      type: object
+      required: [signedXdr]
+      properties:
+        signedXdr:
+          type: string
+          description: |
+            Base64 XDR of the investor-signed `refund_claim()` transaction envelope
+            (the XDR returned by the `prepare` endpoint, signed by the wallet).
+          example: AAAAAgAAAAA...
+
     # ── Responses ──────────────────────────────────────────────────────────────
     ChallengeResponse:
       type: object
@@ -639,6 +690,31 @@ components:
         status:
           type: string
           enum: [REJECTED]
+
+    AdminCancelCampaignResponse:
+      type: object
+      description: |
+        The refund opened by cancelling the campaign. The on-chain freeze
+        (`cancel()`), the pro-rata snapshot, and posting the refund root
+        (`set_refund`) all run asynchronously in the background — poll
+        `GET /campaigns/{campaignId}/refund` for progress. Idempotent: re-cancelling
+        returns the existing refund.
+      required: [id, campaignId, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        campaignId:
+          type: string
+          format: uuid
+        reason:
+          type: [string, 'null']
+          example: Bisnis gagal memenuhi milestone; dana dikembalikan ke investor.
+        status:
+          $ref: '#/components/schemas/RefundStatus'
+        createdAt:
+          type: string
+          format: date-time
 
     Proposal:
       type: object
@@ -973,6 +1049,117 @@ components:
               format: uuid
             status:
               $ref: '#/components/schemas/DistributionStatus'
+
+    Refund:
+      type: object
+      description: |
+        A campaign's refund (at most one per campaign), opened when an admin cancels
+        it. Returned by the per-campaign refund read; `null` if the campaign has not
+        been cancelled.
+      required: [id, campaignId, totalAmount, totalClaimed, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        campaignId:
+          type: string
+          format: uuid
+        reason:
+          type: [string, 'null']
+          description: Why the campaign was cancelled (shown to investors)
+          example: Bisnis gagal memenuhi milestone; dana dikembalikan ke investor.
+        totalAmount:
+          type: string
+          description: |
+            Remaining custody (`raised − released`, read on-chain) being refunded, as
+            a decimal string (7 decimals). 0 until the orchestrator snapshots the pot.
+          example: "1000.0000000"
+        totalShares:
+          type: [string, 'null']
+          description: Total snapshotted shares across eligible holders (null until snapshotted)
+          example: "1000.0000000"
+        totalClaimed:
+          type: string
+          description: Principal claimed so far, as a decimal string (7 decimals)
+          example: "600.0000000"
+        merkleRoot:
+          type: [string, 'null']
+          description: Hex-encoded refund Merkle root posted on-chain (null until the tree is built)
+        snapshotLedger:
+          type: [integer, 'null']
+          format: int64
+          description: Stellar ledger sequence the holdings snapshot was taken at
+          example: 1234567
+        status:
+          $ref: '#/components/schemas/RefundStatus'
+        createdAt:
+          type: string
+          format: date-time
+
+    RefundClaim:
+      type: object
+      description: The caller's own refund entitlement for one cancelled campaign, including the Merkle proof.
+      required: [id, refundId, shareAmount, amount, merkleProof, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        refundId:
+          type: string
+          format: uuid
+        shareAmount:
+          type: string
+          description: The holder's snapshotted share balance, as a decimal string (7 decimals)
+          example: "600.0000000"
+        amount:
+          type: string
+          description: The holder's pro-rata principal entitlement, as a decimal string (7 decimals)
+          example: "600.0000000"
+        leafIndex:
+          type: [integer, 'null']
+          description: The leaf index in the Merkle tree (also the on-chain `refund_claim()` index)
+          example: 0
+        merkleProof:
+          type: array
+          items:
+            type: string
+          description: Hex-encoded sibling hashes proving the leaf against the posted root
+        claimTxHash:
+          type: [string, 'null']
+          minLength: 64
+          maxLength: 64
+          description: Hex-encoded Stellar transaction hash of the on-chain `refund_claim()`
+        status:
+          $ref: '#/components/schemas/RefundClaimStatus'
+        claimedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        refund:
+          type: object
+          description: Minimal parent-refund context for the entitlement.
+          properties:
+            campaignId:
+              type: string
+              format: uuid
+            status:
+              $ref: '#/components/schemas/RefundStatus'
+
+    PrepareRefundClaimResponse:
+      type: object
+      required: [refundId, xdr]
+      properties:
+        refundId:
+          type: string
+          format: uuid
+        xdr:
+          type: string
+          description: |
+            Base64 XDR of the unsigned, prepared `refund_claim()` transaction (investor
+            as source). Sign it with the wallet and post it back to the submit endpoint.
+          example: AAAAAgAAAAA...
 
     ProposalMilestone:
       type: object
@@ -1707,6 +1894,67 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: Proposal is not in a reviewable (SUBMITTED/UNDER_REVIEW) state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/campaigns/{id}/cancel:
+    post:
+      tags: [admin]
+      summary: Cancel a campaign and open a refund
+      description: |
+        Cancels a problematic **funded** campaign and opens its refund. In one
+        transaction the campaign flips to `CANCELLED` and a `Refund` row (PENDING) is
+        created; **after commit** the refund orchestrator is enqueued. The
+        orchestrator freezes the contract on-chain (`cancel()` — `invest()` and
+        `release_milestone()` then revert), snapshots current share ownership, splits
+        the **remaining custody** (`raised − released`) integer-floor pro-rata, and
+        posts the refund Merkle root (`set_refund`). None of that on-chain work runs
+        inside the request. Requires the `ADMIN` role.
+
+        Only a campaign that is **live on-chain** and not already terminal can be
+        cancelled: an already-`CANCELLED` or `COMPLETED` campaign, or one not yet
+        `LIVE`, returns **409**. Idempotent — re-cancelling returns the existing
+        refund (and re-enqueues it if it stalled).
+      operationId: adminCampaignCancel
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the campaign to cancel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelCampaignRequest'
+      responses:
+        '200':
+          description: Campaign cancelled; refund opened and orchestrator enqueued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCancelCampaignResponse'
+        '400':
+          description: Missing or invalid reason
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Campaign is already cancelled/completed, or not live on-chain
           content:
             application/json:
               schema:
@@ -2567,6 +2815,161 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: Voting is not open for this milestone (not VOTING, or the window has closed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /campaigns/{campaignId}/refund:
+    get:
+      tags: [refunds]
+      summary: Get a campaign's refund
+      description: |
+        Returns the campaign's refund (status + totals), or `null` if the campaign
+        has not been cancelled. Any authenticated user may read. An unknown campaign
+        id returns **404**.
+      operationId: campaignRefundGet
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the campaign
+      responses:
+        '200':
+          description: The campaign's refund, or null if not cancelled
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Refund'
+                  - type: 'null'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /refunds/mine:
+    get:
+      tags: [refunds]
+      summary: List own refund entitlements
+      description: |
+        Returns the authenticated investor's own `RefundClaim` entitlements (with
+        Merkle proofs), newest first. Requires the `INVESTOR` role.
+      operationId: refundListMine
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The caller's refund entitlements
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RefundClaim'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /refunds/{refundId}/claim/prepare:
+    post:
+      tags: [refunds]
+      summary: Prepare a refund_claim() transaction
+      description: |
+        Builds and simulates a `refund_claim()` transaction **sourced at the
+        investor's wallet** — filling in the leaf index, wallet, amount, and Merkle
+        proof from the caller's entitlement — and returns the unsigned XDR to sign.
+        Requires the `INVESTOR` role and an `APPROVED` KYC profile. **404** if the
+        caller has no entitlement; **409** if the refund is not yet `COMPLETED` or
+        the entitlement is already claimed.
+      operationId: refundClaimPrepare
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: refundId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the refund to claim from
+      responses:
+        '200':
+          description: Unsigned prepared transaction XDR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrepareRefundClaimResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Refund not ready, or entitlement already claimed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /refunds/{refundId}/claim:
+    post:
+      tags: [refunds]
+      summary: Submit a signed refund_claim() transaction
+      description: |
+        Verifies the investor-signed transaction really is this investor's
+        `refund_claim()` for this entitlement (matching contract, leaf index,
+        claimant, and amount), wraps it in a **platform fee-bump**, submits it, and —
+        on success — marks the `RefundClaim` `CLAIMED` and bumps the refund's
+        `totalClaimed`. Idempotent on the transaction hash. Requires the `INVESTOR`
+        role and an `APPROVED` KYC profile.
+      operationId: refundClaimSubmit
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: refundId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the refund
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitRefundClaimRequest'
+      responses:
+        '201':
+          description: Claim recorded (CLAIMED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefundClaim'
+        '400':
+          description: |
+            Malformed XDR, or the tx does not match the expected `refund_claim()` for
+            this entitlement (wrong contract, function, index, claimant, or amount).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Refund not ready, or entitlement already claimed
           content:
             application/json:
               schema:

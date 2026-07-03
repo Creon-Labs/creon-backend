@@ -10,11 +10,11 @@
 > distribution folded into `Campaign` — see #7), and ownership tracking uses an
 > **external indexer service** rather than a self-hosted worker (see #9).
 >
-> Last updated: 2026-07-01.
+> Last updated: 2026-07-03.
 
 ## Status at a glance
 
-- ✅ **Persistence foundation** — Prisma 7 + PostgreSQL schema (11 models + 11
+- ✅ **Persistence foundation** — Prisma 7 + PostgreSQL schema (15 models + 15
   enums), migrations, global `PrismaModule`, docker-compose Postgres + Valkey +
   MinIO, seed. See `prisma/schema.prisma` and `src/prisma/`.
 - ✅ **Wallet auth + KYC / admin approval + proposals** — challenge/signature JWT
@@ -48,6 +48,7 @@
 | 12 | **Shared `ComplianceRegistry` contract** (singleton) holds the single whitelist; every share token queries it (not a per-token list) | One KYC → whitelisted for all campaigns; one place for the backend to add/revoke; gives a home for revocation (expired KYC / sanctions) | ✅ Built (Phase 1, testnet) |
 | 13 | **Deploy orchestration is backend-driven, async + idempotent — no factory contract** | On approval the backend submits N deploy txs in sequence via a DB state machine (`PENDING → DEPLOYING_TOKEN → DEPLOYING_CAMPAIGN → WIRING → LIVE`), resumable on partial failure (idempotent on the unique `tx_hash` + deterministic salt). A factory adds contract-side complexity not worth it at this scale | ✅ Built (BullMQ on Valkey; `CampaignDeployService` + `CampaignDeployStatus` enum; admin approval is the trigger) |
 | 14 | **Investor onboarding mirrors the entrepreneur flow**: wallet register → KYC → backend whitelists the address; `invest()` is whitelist-gated on-chain | Securities crowdfunding (OJK SCF) requires KYC'd investors; gating in the contract means an unregistered wallet that calls `invest()` directly is *rejected*, not merely discouraged | ✅ Register + KYC (shared role-agnostic `KycProfile`) + on-chain whitelist sync built (`src/kyc/kyc-whitelist.*`, BullMQ: approve→`registry.add`, revoke→`registry.remove`) |
+| 15 | **Refunds via a dedicated on-chain path** (admin-cancel → freeze → pro-rata of the *remaining* custody), **not** a reuse of the dividend distribution | A funded campaign can turn out fraudulent or fail to deliver; investors need their principal back. A distinct `cancel()` / `set_refund()` / `refund_claim()` path (reusing the Merkle machinery) lets cancel **freeze** `invest()` + `release_milestone()` — the load-bearing safety property a dividend can't express — while refunding only what is still in custody (`raised − released`), so it is always executable even after milestones paid the business | ✅ Built (contract path + `src/refund/` BullMQ orchestrator + admin cancel; on `dev`, **pending WASM redeploy**) |
 
 ### Key distinction to remember: what "lock" actually locks
 Lock applies to **(a) withdrawing principal** and **(b) transferring the share
@@ -86,16 +87,18 @@ transfer. This is the Soroban equivalent of a permissioned security token
 
 ## Data model (implemented)
 
-11 models in `prisma/schema.prisma`:
+15 models in `prisma/schema.prisma`:
 
 ```
-User ──┬─ kycProfile (1:1, role-agnostic) Proposal ──1:1──> Campaign
-       ├─ proposals (entrepreneur)           │                 ├─1:1──> ProjectToken   (isTransferable = lock flag)
-       ├─ reviews   (admin)                   │                 ├─1:1──> CampaignVault  (custody + lock + release)
-       ├─ investments                        │                 ├─1:N──> Investment     (lpTokens = pro-rata basis)
-       ├─ holdings (TokenHolding)            │                 ├─1:N──> TokenHolding   (current ownership, from indexer)
-       └─ distributionClaims                 │                 └─1:N──> ProfitDistribution ─1:N─> DistributionClaim
-                                             └─1:N──> ProposalReview (approval audit trail)
+User ──┬─ kycProfile (1:1, role-agnostic)  Proposal ─┬─1:1──> Campaign
+       ├─ proposals (entrepreneur)                    │          ├─1:1──> ProjectToken   (isTransferable = lock flag)
+       ├─ reviews   (admin)                           │          ├─1:1──> CampaignVault  (custody + lock + release)
+       ├─ investments                                 │          ├─1:1──> Refund ──1:N──> RefundClaim  (opened on cancel)
+       ├─ holdings (TokenHolding)                     │          ├─1:N──> Investment     (lpTokens = pro-rata basis)
+       ├─ distributionClaims                          │          ├─1:N──> TokenHolding   (current ownership, from indexer)
+       ├─ refundClaims                                │          └─1:N──> ProfitDistribution ─1:N─> DistributionClaim
+       └─ milestoneVotes                              ├─1:N──> ProposalReview (approval audit trail)
+                                                      └─1:N──> Milestone ──1:N──> MilestoneVote  (campaignId set at approval)
 ```
 
 `KycProfile` also carries the on-chain whitelist-sync state (`whitelistStatus` +
@@ -129,6 +132,39 @@ The target flow once the on-chain pieces exist:
 Why merkle: entitlement must be enforced **on-chain**, not just trusted from the
 DB. The contract verifies each proof against the root, so the backend cannot forge
 amounts, and total claims are bounded by the deposited amount.
+
+---
+
+## Refund flow (campaign cancellation)
+
+When a funded campaign turns out to be fraudulent or fails to deliver, an admin
+cancels it and investors pull back their pro-rata share of whatever USDC is **still in
+custody**. This reuses the dividend Merkle machinery, but the pot is the *remaining
+custody* (not a fresh deposit) and cancel **freezes** the contract:
+
+```
+1. Admin POST /admin/campaigns/:id/cancel {reason}
+        └─ one DB tx: Campaign → CANCELLED + open Refund (PENDING) → enqueue orchestrator
+2. Orchestrator: cancel() on-chain
+        └─ freezes invest() + release_milestone() (both now revert CampaignCancelled)
+3. Snapshot TokenHolding; pot = raised − released (read on-chain, not the DB mirror)
+        └─ integer-floor pro-rata by shares ⇒ Σ refunds ≤ actual custody (dust stays)
+        └─ build a refund Merkle tree → persist one RefundClaim per holder
+4. Orchestrator: set_refund(root) on-chain → Refund COMPLETED (claimable)
+5. Investor: refund_claim(index, addr, amount, proof) via prepare→sign→submit relay
+        └─ contract verifies the proof → USDC principal returned → RefundClaim CLAIMED
+```
+
+Why a *dedicated* path rather than reusing `set_distribution`: the load-bearing
+property is the **freeze** — once cancelled, no new money in and no more principal out
+to the business — which a dividend distribution cannot express. Refunding only the
+*remaining* custody keeps it always executable even when milestones already paid the
+business (investors get <100% in that case — honest about on-chain reality). Shares are
+**not** burned (a CANCELLED campaign runs no further dividends/milestones, so it is
+harmless — noted as optional hardening). Unclaimed refunds stay claimable indefinitely
+(no on-chain reclaim path). The orchestrator is the **4th** BullMQ orchestrator and
+follows the same idempotent/resumable shape (resume points derived from `cancelTxHash`
+/ claims-exist / `setRefundTxHash`, not the status column alone).
 
 ---
 
@@ -196,6 +232,17 @@ What still needs to be built, grouped by area. Check items off as they land.
 - [ ] Tests (unit + e2e) for services and the indexer. (Colocated `*.spec.ts` ship with every service/guard; **indexer tests pending its build**.)
 - [ ] Observability/logging for the indexer and on-chain calls.
 - [x] Revisit Prisma 7 (driver adapter + `prisma.config.ts`). (Migrated to 7.8.)
+
+### H. Refunds & cancellation
+> Admin-triggered refund for a problematic funded campaign. See the
+> [refund flow](#refund-flow-campaign-cancellation) and Decision #15.
+- [x] Contract freeze + refund path (`contracts/campaign`) — `cancel()` freezes `invest()`/`release_milestone()`; `set_refund(root)` posts a distinct refund root; `refund_claim(index, addr, amount, proof)` pays pro-rata principal (no whitelist gate — investor pulling their own money). Reuses `DistributionLeaf` + `merkle::verify_proof` verbatim. _(Built; **pending WASM redeploy** — rides the same re-upload as milestones.)_
+- [x] `Refund` / `RefundClaim` models (mirror `ProfitDistribution` / `DistributionClaim`; unique tx-hash idempotency keys) + migration.
+- [x] Refund orchestrator (`src/refund/`, the 4th BullMQ orchestrator) — `cancel()` → snapshot holdings → pro-rata over **remaining custody** (`raised − released`, read on-chain) → build Merkle tree + persist claims → `set_refund(root)` → COMPLETED.
+- [x] Admin cancel trigger (`POST /admin/campaigns/:id/cancel`, `src/admin/admin-campaign.*`) — flips `Campaign` CANCELLED + opens the `Refund` in one tx, enqueues after commit (mirrors proposal approval); idempotent on the unique `campaignId`.
+- [x] Investor claim relay (`GET /refunds/mine`, `POST /refunds/:id/claim/prepare|claim`) — same prepare/sign/submit shape as dividend `claim()`, no deposit step.
+- [x] CANCELLED guards on the milestone services (release reconcile/drive skip; voting submit/settle skip) so no work is attempted against a frozen contract.
+- [ ] On-chain e2e (needs a funded `STELLAR_PLATFORM_SECRET` + the redeployed WASM).
 
 ---
 
