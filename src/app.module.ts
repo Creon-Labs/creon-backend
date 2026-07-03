@@ -18,6 +18,7 @@ import { IndexerModule } from './indexer/indexer.module';
 import { HoldingModule } from './holding/holding.module';
 import { DistributionModule } from './distribution/distribution.module';
 import { MilestoneModule } from './milestone/milestone.module';
+import { RefundModule } from './refund/refund.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { MilestoneModule } from './milestone/milestone.module';
     HoldingModule,
     DistributionModule,
     MilestoneModule,
+    RefundModule,
   ],
   controllers: [AppController],
   providers: [AppService],
