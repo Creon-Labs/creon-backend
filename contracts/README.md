@@ -94,6 +94,7 @@ instances to two.
 | Platform can't forge dividend amounts | `claim` recomputes the leaf hash and verifies a **commutative SHA-256 Merkle proof** against the posted root ([`campaign/src/merkle.rs`](./campaign/src/merkle.rs)); each `(id, index)` is claimable once |
 | Investor pulls funds directly | `invest`/`deposit_profit`/`claim` each `require_auth()` on the acting wallet — the platform key can't move a user's USDC |
 | No silent share destruction | shares are non-burnable; only `mint`/`transfer` events exist for the off-chain ownership indexer |
+| A failed campaign can't strand investor funds | `cancel` freezes `invest`/`release_milestone`; `refund_claim` reuses the same Merkle-proof verification as dividend `claim` (commutative SHA-256, once per index) over the remaining custody ([`campaign/src/lib.rs`](./campaign/src/lib.rs)) |
 
 ## Deployed on testnet
 
