@@ -206,7 +206,7 @@ pnpm test:cov               # coverage
 ```
 
 Every service and guard ships a colocated `*.spec.ts`. The Soroban contracts are tested
-separately from `contracts/` (`cargo test` — 18 unit/integration tests, all green); see
+separately from `contracts/` (`cargo test` — 22 unit/integration tests, all green); see
 [`contracts/README.md`](contracts/README.md).
 
 ## Docs
