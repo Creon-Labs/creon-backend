@@ -1,9 +1,12 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
 import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './storage/storage.module';
 import { CacheModule } from './cache/cache.module';
@@ -62,6 +65,10 @@ import { RefundModule } from './refund/refund.module';
     RefundModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    { provide: APP_INTERCEPTOR, useClass: ResponseEnvelopeInterceptor },
+    { provide: APP_FILTER, useClass: HttpExceptionFilter },
+  ],
 })
 export class AppModule {}
