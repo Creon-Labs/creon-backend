@@ -24,6 +24,8 @@ loadEnv({ path: join(ROOT, '.env') });
 
 const BASE_URL = `http://localhost:${process.env.PORT ?? 3000}`;
 const NETWORK_PASSPHRASE = process.env.STELLAR_NETWORK_PASSPHRASE!;
+/** Name of the httpOnly cookie AuthController sets the JWT under (auth-cookie.constants.ts). */
+const AUTH_COOKIE_NAME = 'creon_access_token';
 
 // Minimal valid 1x1 transparent PNG, reused as the KYC id/selfie + milestone proof stand-in.
 const TINY_PNG = Buffer.from(
@@ -77,7 +79,31 @@ async function apiRequest(
   if (!res.ok) {
     throw new Error(`${method} ${path} -> ${res.status}: ${JSON.stringify(json)}`);
   }
-  return json;
+  // Every response is enveloped as { statusCode, message, data } — see CLAUDE.md's
+  // "Every HTTP response is enveloped" convention.
+  return json?.data;
+}
+
+/** The JWT is delivered only as an httpOnly Set-Cookie (AuthController.setAuthCookie),
+ *  not in the response body — extract it directly and reuse it as a Bearer token, since
+ *  JwtAuthGuard accepts either. */
+async function authRequest(path: '/auth/login' | '/auth/register', body: unknown): Promise<string> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`POST ${path} -> ${res.status}: ${await res.text()}`);
+  }
+  const setCookies = res.headers.getSetCookie();
+  const authCookie = setCookies
+    .map((c) => c.split(';')[0])
+    .find((c) => c.startsWith(`${AUTH_COOKIE_NAME}=`));
+  if (!authCookie) {
+    throw new Error(`No ${AUTH_COOKIE_NAME} cookie in ${path} response`);
+  }
+  return decodeURIComponent(authCookie.slice(AUTH_COOKIE_NAME.length + 1));
 }
 
 function randomNik(): string {
@@ -129,10 +155,7 @@ async function loginWallet(w: Wallet): Promise<string> {
   const kp = Keypair.fromSecret(w.secretKey);
   const message = await challengeMessage(w.publicKey);
   const signature = signChallenge(kp, message);
-  const res = await apiRequest('POST', '/auth/login', {
-    body: { walletAddress: w.publicKey, signature },
-  });
-  return res.accessToken;
+  return authRequest('/auth/login', { walletAddress: w.publicKey, signature });
 }
 
 async function registerOrLogin(
@@ -144,10 +167,7 @@ async function registerOrLogin(
   const message = await challengeMessage(w.publicKey);
   const signature = signChallenge(kp, message);
   try {
-    const res = await apiRequest('POST', '/auth/register', {
-      body: { walletAddress: w.publicKey, signature, role, email },
-    });
-    return res.accessToken;
+    return await authRequest('/auth/register', { walletAddress: w.publicKey, signature, role, email });
   } catch (err) {
     if (String(err).includes('409')) {
       console.log(`  [${role}] already registered, logging in instead`);
