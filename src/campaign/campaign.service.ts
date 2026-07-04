@@ -25,6 +25,8 @@ const PUBLIC_CAMPAIGN_SELECT = {
   raisedAmount: true,
   status: true,
   lockEndAt: true,
+  unlockStatus: true,
+  unlockTxHash: true,
   startAt: true,
   endAt: true,
   projectToken: { select: { assetCode: true, contractAddress: true } },

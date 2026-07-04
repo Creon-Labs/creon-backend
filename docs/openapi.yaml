@@ -204,6 +204,15 @@ components:
         - `COMPLETED` – contract frozen, remaining custody snapshotted, claims persisted, and `set_refund` posted on-chain (claimable)
         - `FAILED` – the refund orchestrator errored (retried with backoff)
 
+    UnlockStatus:
+      type: string
+      enum: [ PENDING, UNLOCKING, UNLOCKED, FAILED ]
+      description: |
+        - `PENDING` – the campaign's lock period has not elapsed yet, or the unlock job hasn't run
+        - `UNLOCKING` – the on-chain `unlock()` call is in flight
+        - `UNLOCKED` – `unlock()` succeeded; the ShareToken is now transferable to whitelisted addresses
+        - `FAILED` – the unlock orchestrator errored (retried with backoff)
+
     RefundClaimStatus:
       type: string
       enum: [ PENDING, CLAIMED, FAILED ]
@@ -855,6 +864,11 @@ components:
         lockEndAt:
           type: [ string, 'null' ]
           format: date-time
+        unlockStatus:
+          $ref: '#/components/schemas/UnlockStatus'
+        unlockTxHash:
+          type: [ string, 'null' ]
+          description: Stellar tx hash of the on-chain `unlock()` call; null until UNLOCKED
         startAt:
           type: [ string, 'null' ]
           format: date-time

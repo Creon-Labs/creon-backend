@@ -126,6 +126,7 @@ When an admin approves a Proposal (`POST /admin/proposals/:id/approve`), the bac
 **Caveats:**
 - **Gate the "Invest" action on both `deployStatus === "LIVE"` and `status === "ACTIVE"`** — do not rely solely on the presence of a `contractAddress`. Otherwise, the invest-prepare endpoint will throw a `409 Conflict`.
 - **Investor Whitelist Ordering (Crucial):** An Investor's Wallet must be registered in the on-chain compliance registry before `invest()` will succeed. This happens automatically via an async background job after their KYC is approved, tracked internally as `KycProfile.whitelistStatus` (`NOT_SYNCED → ADDING → WHITELISTED`) — **which is not currently exposed on `GET /kyc/me`**. If an Investor attempts to invest immediately after KYC approval and it fails, the on-chain sync likely hasn't finished yet. Show a "Please try again in a moment" message rather than a hard system error.
+- **Unlock is fully automatic** — once `Campaign.lockEndAt` passes, a background job calls the on-chain `unlock()` with no admin or user action required. Poll `unlockStatus` on `GET /campaigns/:id`; once it reaches `UNLOCKED`, shares are transferable P2P to any other whitelisted address (this is separate from investing — there is no in-app secondary market/AMM).
 
 ---
 
@@ -310,6 +311,7 @@ A quick reference for what to poll and what each status means (highly useful for
 | Proposal | `Proposal.status` | `DRAFT` (editable) → `SUBMITTED` → `UNDER_REVIEW` → `APPROVED` / `REJECTED` |
 | Campaign | `Campaign.deployStatus` | `PENDING`…`WIRING` (show loading state) → `LIVE` (ready to use) / `FAILED` |
 | Campaign | `Campaign.status` | `PENDING_DEPLOYMENT` → `ACTIVE` (ready for investment) → `LOCKED` / `GOAL_REACHED` / `COMPLETED` / `CANCELLED` (admin-cancelled — check `GET /campaigns/:id/refund` for payout status) |
+| Campaign | `Campaign.unlockStatus` | `PENDING` (principal lock still active) → `UNLOCKING` (transient) → `UNLOCKED` (shares now P2P-transferable to whitelisted addresses) / `FAILED` (retried automatically) |
 | Investment | `Investment.status` | `CONFIRMED` (submit is synchronous; you will rarely ever see `PENDING` or `FAILED`) |
 | Distribution | `ProfitDistribution.status` | `PENDING` (building Merkle tree/posting on-chain — claims are not ready yet) → `COMPLETED` (ready to claim) / `FAILED` |
 | Claim | `DistributionClaim.status` | `PENDING` (claimable, show the button) → `CLAIMED` (done) |

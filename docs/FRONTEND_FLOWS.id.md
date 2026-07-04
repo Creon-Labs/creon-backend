@@ -126,6 +126,7 @@ Ketika admin menyetujui sebuah *Proposal* (`POST /admin/proposals/:id/approve`),
 **Catatan Penting:**
 - **Kunci aksi "Invest" berdasarkan kombinasi `deployStatus === "LIVE"` dan `status === "ACTIVE"`** — jangan hanya mengecek keberadaan `contractAddress`. Jika tidak, *endpoint* invest-prepare akan menghasilkan *error* 409.
 - **Urutan whitelist Investor (sangat penting):** *Wallet* seorang *Investor* harus ditambahkan ke sistem registri kepatuhan (*compliance registry*) *on-chain* sebelum fungsi `invest()` berhasil dieksekusi. Ini terjadi secara otomatis setelah KYC disetujui lewat proses asinkron terpisah, yang dilacak melalui `KycProfile.whitelistStatus` (`NOT_SYNCED → ADDING → WHITELISTED`) — **saat ini field tersebut tidak diekspos pada `GET /kyc/me`**. Jadi, jika aksi `invest` pertama seorang *Investor* gagal tepat sesaat setelah KYC mereka disetujui, kemungkinan besar sinkronisasi *whitelist* *on-chain* belum selesai — tampilkan pesan "silakan coba lagi dalam beberapa saat" (*retry/backoff message*), bukan peringatan *error* sistem (karena *contract* menolak fungsi `invest()` untuk alamat yang belum masuk *whitelist*).
+- **Unlock terjadi sepenuhnya otomatis** — begitu `Campaign.lockEndAt` terlewati, sebuah *background job* memanggil `unlock()` *on-chain* tanpa perlu aksi admin maupun pengguna. Pantau `unlockStatus` pada `GET /campaigns/:id`; setelah bernilai `UNLOCKED`, saham bisa ditransfer P2P ke alamat *whitelisted* lain (ini terpisah dari proses *invest* — belum ada *secondary market*/AMM di dalam aplikasi).
 
 ---
 
@@ -310,6 +311,7 @@ Panduan tentang status apa saja yang perlu di-*polling* dan apa maknanya, bergun
 | Proposal | `Proposal.status` | `DRAFT` (bisa diedit) → `SUBMITTED` → `UNDER_REVIEW` → `APPROVED` / `REJECTED` |
 | Campaign | `Campaign.deployStatus` | `PENDING`…`WIRING` ("sedang di-*deploy*") → `LIVE` (bisa digunakan) / `FAILED` |
 | Campaign | `Campaign.status` | `PENDING_DEPLOYMENT` → `ACTIVE` (siap untuk di-*invest*) → `LOCKED` / `GOAL_REACHED` / `COMPLETED` / `CANCELLED` (dibatalkan admin — cek `GET /campaigns/:id/refund` untuk status pencairan) |
+| Campaign | `Campaign.unlockStatus` | `PENDING` (masa *lock* prinsipal masih berlaku) → `UNLOCKING` (transien) → `UNLOCKED` (saham sudah bisa ditransfer P2P ke alamat *whitelisted*) / `FAILED` (dicoba ulang otomatis) |
 | Investment | `Investment.status` | `CONFIRMED` (proses *submit* berjalan sinkron; Anda akan sangat jarang melihat status `PENDING` / `FAILED`) |
 | Distribution | `ProfitDistribution.status` | `PENDING` (sedang membangun *Merkle tree* / mem-*posting* ke *on-chain* — akses *claim* belum siap) → `COMPLETED` (bisa di-*claim*) / `FAILED` |
 | Claim | `DistributionClaim.status` | `PENDING` (bisa di-*claim*, tampilkan tombolnya) → `CLAIMED` (selesai) |
