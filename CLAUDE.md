@@ -100,7 +100,10 @@ Valkey/BullMQ connection + `defaultJobOptions`: 5 attempts, exponential 5 s back
 `removeOnComplete`), then `PrismaModule` (global), `StorageModule`, `CacheModule`
 (global), `SorobanModule`, `AuthModule`, `KycModule`, `AdminModule`,
 `ProposalModule`, `CampaignModule`, `InvestmentModule`, `IndexerModule`,
-`HoldingModule`, `DistributionModule`, `MilestoneModule`, `RefundModule`. `main.ts`
+`HoldingModule`, `DistributionModule`, `MilestoneModule`, `RefundModule`, and a
+global `ResponseEnvelopeInterceptor` + `HttpExceptionFilter` (`src/common/`,
+registered as `APP_INTERCEPTOR`/`APP_FILTER` providers — see Conventions) that
+envelope every HTTP response. `main.ts`
 installs a global `ValidationPipe`
 (`whitelist + transform`) and a `BigInt.prototype.toJSON` patch so Prisma
 ledger-sequence fields serialize to JSON.
@@ -257,6 +260,15 @@ Key domain invariants to remember (from `docs/ARCHITECTURE.md`):
 
 - DTOs use `class-validator` / `class-transformer`; the global `ValidationPipe`
   strips unknown properties (`whitelist`) and coerces types (`transform`).
+- **Every HTTP response is enveloped.** Success is `{ statusCode, message, data
+  }`; errors are `{ statusCode, message, error, data: null }` (`204 No
+  Content` — only `POST /auth/logout` today — is passed through unwrapped, since
+  a 204 must have a genuinely empty body). Every controller handler should carry
+  `@ResponseMessage('...')` (`src/common/decorators/response-message.decorator.ts`)
+  with a specific, human-readable message — a missing decorator silently falls
+  back to `"Success"` rather than failing, so don't rely on that fallback for new
+  routes. Keep `docs/openapi.yaml` and `docs/FRONTEND_FLOWS(.id).md` in sync with
+  any response-shape change — a separate frontend repo consumes them.
 - Services throw Nest HTTP exceptions (`BadRequestException`, `ConflictException`,
   `NotFoundException`, `UnauthorizedException`) rather than returning error shapes.
 - Every service/guard ships a colocated `*.spec.ts`; mirror that when adding code.
