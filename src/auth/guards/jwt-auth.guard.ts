@@ -7,6 +7,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
 import { Role } from '../../../generated/prisma/enums';
+import { AUTH_COOKIE_NAME } from '../constants/auth-cookie.constants';
 import { AuthUser } from '../types/auth-user';
 
 /** Shape of the JWT payload minted in `AuthService#signToken`. */
@@ -16,9 +17,11 @@ interface JwtPayload {
 }
 
 /**
- * Authenticate a request from its `Authorization: Bearer <token>` header,
- * verifying the JWT with the module secret and attaching the decoded principal
- * to `request.user`. Throws {@link UnauthorizedException} when absent/invalid.
+ * Authenticate a request from either its `Authorization: Bearer <token>`
+ * header or its `AUTH_COOKIE_NAME` httpOnly cookie (the header takes
+ * precedence when both are present), verifying the JWT with the module
+ * secret and attaching the decoded principal to `request.user`. Throws
+ * {@link UnauthorizedException} when absent/invalid.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -47,10 +50,14 @@ export class JwtAuthGuard implements CanActivate {
 
   private extractToken(request: Request): string | undefined {
     const header = request.headers.authorization;
-    if (!header) {
-      return undefined;
+    if (header) {
+      const [scheme, value] = header.split(' ');
+      if (scheme === 'Bearer' && value) {
+        return value;
+      }
     }
-    const [scheme, value] = header.split(' ');
-    return scheme === 'Bearer' && value ? value : undefined;
+    const cookies = request.cookies as
+      Record<string, string | undefined> | undefined;
+    return cookies?.[AUTH_COOKIE_NAME];
   }
 }
