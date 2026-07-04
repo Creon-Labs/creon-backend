@@ -109,6 +109,21 @@ tags:
       cannot forge amounts. There is no deposit step (the money is the principal
       already in custody); unclaimed refunds remain claimable indefinitely (no
       on-chain reclaim).
+  - name: faucet
+    description: |
+      Public, **unauthenticated** test-USDC faucet (no login required) — so
+      anyone, e.g. hackathon judges, can self-issue test USDC into their own
+      wallet. USDC here is a **classic Stellar asset** issued by the platform
+      key, not a Soroban contract call, so it needs its own two-step relay:
+      1. `POST /faucet/usdc/trustline/prepare` → unsigned `changeTrust` XDR
+         (wallet as source); sign it with the wallet (one-time per wallet).
+      2. `POST /faucet/usdc/trustline/submit` → backend fee-bumps + submits it.
+      3. `POST /faucet/usdc/claim` → backend sends a fixed amount of test USDC
+         from the platform (issuer) key; needs no signature from the caller.
+         Cooldown-limited per wallet (`FAUCET_CLAIM_COOLDOWN_SECONDS`, default 24h).
+
+      The wallet must already exist on-chain with some testnet XLM (via the
+      public Stellar friendbot) before either step works.
 
 components:
   securitySchemes:
@@ -1443,6 +1458,72 @@ components:
           type: string
           description: The voter's current share balance, as a decimal string (7 decimals)
           example: "500.0000000"
+
+    # ── Faucet ─────────────────────────────────────────────────────────────────
+    PrepareFaucetTrustlineRequest:
+      type: object
+      required: [ walletAddress ]
+      properties:
+        walletAddress:
+          type: string
+          description: Stellar public key (G...) to establish the USDC trustline for
+          example: GABC1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF12345
+
+    PrepareFaucetTrustlineResponse:
+      type: object
+      required: [ xdr ]
+      properties:
+        xdr:
+          type: string
+          description: |
+            Base64 XDR of the unsigned `changeTrust` transaction (wallet as
+            source). Sign it with the wallet and post it back to the submit
+            endpoint.
+          example: AAAAAgAAAAA...
+
+    SubmitFaucetTrustlineRequest:
+      type: object
+      required: [ walletAddress, signedXdr ]
+      properties:
+        walletAddress:
+          type: string
+          description: Same wallet address passed to the prepare call
+          example: GABC1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF12345
+        signedXdr:
+          type: string
+          description: Base64 XDR of the wallet-signed `changeTrust` transaction
+          example: AAAAAgAAAAA...
+
+    SubmitFaucetTrustlineResponse:
+      type: object
+      required: [ txHash ]
+      properties:
+        txHash:
+          type: string
+          description: Hash of the submitted `changeTrust` transaction
+
+    ClaimFaucetRequest:
+      type: object
+      required: [ walletAddress ]
+      properties:
+        walletAddress:
+          type: string
+          description: Stellar public key (G...) to receive the test USDC
+          example: GABC1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF12345
+
+    ClaimFaucetResponse:
+      type: object
+      required: [ txHash, amount, walletAddress ]
+      properties:
+        txHash:
+          type: string
+          description: Hash of the submitted `payment` transaction
+        amount:
+          type: string
+          description: Amount of test USDC sent (`FAUCET_USDC_AMOUNT`)
+          example: "1000"
+        walletAddress:
+          type: string
 
     ErrorResponse:
       type: object
@@ -3347,6 +3428,130 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: Refund not ready, or entitlement already claimed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /faucet/usdc/trustline/prepare:
+    post:
+      tags: [ faucet ]
+      summary: Siapkan Trustline USDC (XDR)
+      description: |
+        Membuat transaksi mentah (XDR) `changeTrust` untuk wallet, agar wallet
+        tersebut bisa menerima USDC test. **Tidak perlu login.**
+
+        **Untuk Frontend:**
+        - Cukup panggil dengan `walletAddress` dari wallet yang terhubung.
+        - Wallet harus sudah punya saldo XLM testnet (via friendbot) sebelum ini.
+        - Kalau wallet sudah punya trustline, endpoint ini akan 409 — langsung
+          panggil `/faucet/usdc/claim`.
+      operationId: faucetTrustlinePrepare
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrepareFaucetTrustlineRequest'
+      responses:
+        '200':
+          description: Unsigned prepared changeTrust transaction XDR
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PrepareFaucetTrustlineResponse'
+        '400':
+          description: Invalid wallet address, or wallet not found on-chain (fund it via friendbot first)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Wallet already has a USDC trustline
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /faucet/usdc/trustline/submit:
+    post:
+      tags: [ faucet ]
+      summary: Kirim Trustline USDC (Submit)
+      description: |
+        Mengirim XDR `changeTrust` yang sudah ditandatangani wallet ke blockchain
+        (backend menambahkan fee-bump). **Tidak perlu login.**
+      operationId: faucetTrustlineSubmit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitFaucetTrustlineRequest'
+      responses:
+        '201':
+          description: Trustline established
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SubmitFaucetTrustlineResponse'
+        '400':
+          description: |
+            Malformed XDR, or the tx is not a changeTrust() for the platform USDC
+            asset sourced by the given walletAddress.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /faucet/usdc/claim:
+    post:
+      tags: [ faucet ]
+      summary: Klaim USDC Test
+      description: |
+        Mengirim sejumlah USDC test (`FAUCET_USDC_AMOUNT`) langsung dari platform
+        ke wallet. **Tidak perlu login, dan tidak perlu tanda tangan wallet** —
+        pembayaran ditandatangani sepenuhnya oleh platform (issuer USDC ini).
+
+        **Untuk Frontend:**
+        - Wallet harus sudah punya trustline USDC (lihat `/trustline/prepare`).
+        - Dibatasi cooldown per wallet (`FAUCET_CLAIM_COOLDOWN_SECONDS`, default 24 jam).
+      operationId: faucetClaim
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimFaucetRequest'
+      responses:
+        '201':
+          description: USDC sent to the wallet
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ClaimFaucetResponse'
+        '400':
+          description: Invalid wallet address, wallet not found on-chain, or no USDC trustline yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Wallet already claimed within the cooldown window
           content:
             application/json:
               schema:

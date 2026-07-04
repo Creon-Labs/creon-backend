@@ -270,6 +270,36 @@ For a problematic Campaign (fraud, business failure, etc.), an admin can cancel 
 
 ---
 
+## Flow 10 — Faucet: Get Test USDC (No Login Required)
+
+A self-service faucet so anyone — chiefly hackathon judges — can get test USDC into their own wallet without registering or KYC. Unlike every other flow in this document, **these three endpoints need no JWT** (no cookie, no `Authorization` header) — the wallet address is passed directly in the body.
+
+Test USDC here is a **classic Stellar asset** (not a Soroban contract mint), issued by the platform key. That splits the flow into two different signers:
+- `changeTrust` (establishing the trustline) must be signed by the **wallet itself** — one-time per wallet.
+- The actual "mint" is a classic `payment` signed only by the **platform** (the issuer) — the caller signs nothing for this part.
+
+**Steps:**
+1. Make sure the wallet already has some testnet XLM (Freighter's built-in "Fund with friendbot" button, or visit `https://friendbot.stellar.org?addr=<publicKey>`). This is outside our API — both endpoints below 400 with a clear message if the account doesn't exist on-chain yet.
+2. `POST /faucet/usdc/trustline/prepare { walletAddress }` → unsigned `changeTrust` XDR. If the wallet already has the trustline, this 409s — skip straight to step 4.
+3. Wallet signs the XDR, then `POST /faucet/usdc/trustline/submit { walletAddress, signedXdr }` → backend fee-bumps and submits it.
+4. `POST /faucet/usdc/claim { walletAddress }` → backend sends a fixed amount of test USDC straight from the platform account. No signature needed. Cooldown-limited per wallet (default 24h) — a repeat call within the window 409s.
+
+**Endpoints:**
+
+| Step | Method + Path | Body → Returns (in `data`) |
+|---|---|---|
+| 2 | `POST /faucet/usdc/trustline/prepare` | `{ walletAddress }` → `{ xdr }` |
+| 3 | `POST /faucet/usdc/trustline/submit` | `{ walletAddress, signedXdr }` → `{ txHash }` |
+| 4 | `POST /faucet/usdc/claim` | `{ walletAddress }` → `{ txHash, amount, walletAddress }` |
+
+**Caveats:**
+- **Fully public** — no auth guard at all (same as `GET /campaigns`). Don't send a bearer token or cookie; it's simply ignored.
+- **Step 4 needs no wallet signature** — the payment is entirely platform-signed, since the platform is the asset's issuer. Only the trustline step needs the wallet to sign anything.
+- **Cooldown, not a hard cap** — after the cooldown window elapses, the same wallet can claim again.
+- **Trustline is required before claiming.** If you skip straight to `/claim` on a fresh wallet, expect a `400` telling you to call `/trustline/prepare` first.
+
+---
+
 ## Status Field Cheat-Sheet
 
 A quick reference for what to poll and what each status means (highly useful for managing loading and empty states in the UI).

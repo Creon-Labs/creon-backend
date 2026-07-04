@@ -270,6 +270,36 @@ Untuk sebuah Campaign yang bermasalah (penipuan, bisnis gagal, dsb.), seorang ad
 
 ---
 
+## Flow 10 — Faucet: Klaim USDC Test (Tanpa Login)
+
+*Faucet* mandiri (*self-service*) agar siapa saja — terutama juri hackathon — bisa mendapatkan USDC test ke wallet mereka sendiri tanpa perlu registrasi atau KYC. Berbeda dari semua flow lain di dokumen ini, **ketiga endpoint ini tidak butuh JWT** (tanpa cookie, tanpa header `Authorization`) — alamat wallet dikirim langsung di body.
+
+USDC test di sini adalah **classic Stellar asset** (bukan mint lewat contract Soroban), yang diterbitkan oleh platform key. Karena itu flow-nya terpecah jadi dua penanda tangan berbeda:
+- `changeTrust` (membuka trustline) harus ditandatangani oleh **wallet itu sendiri** — sekali saja per wallet.
+- "Mint" sesungguhnya adalah `payment` klasik yang hanya ditandatangani oleh **platform** (issuer-nya) — pemanggil tidak perlu menandatangani apa pun di bagian ini.
+
+**Langkah-langkah:**
+1. Pastikan wallet sudah punya saldo XLM testnet (tombol bawaan Freighter "Fund with friendbot", atau kunjungi `https://friendbot.stellar.org?addr=<publicKey>`). Ini di luar cakupan API kami — kedua endpoint di bawah akan mengembalikan `400` dengan pesan jelas jika akun belum ada secara on-chain.
+2. `POST /faucet/usdc/trustline/prepare { walletAddress }` → XDR `changeTrust` yang belum ditandatangani. Jika wallet sudah punya trustline, ini akan 409 — langsung lanjut ke langkah 4.
+3. Wallet menandatangani XDR tersebut, lalu `POST /faucet/usdc/trustline/submit { walletAddress, signedXdr }` → backend menambahkan fee-bump dan mengirimkannya.
+4. `POST /faucet/usdc/claim { walletAddress }` → backend mengirim sejumlah USDC test langsung dari akun platform. Tidak perlu tanda tangan. Dibatasi cooldown per wallet (default 24 jam) — pemanggilan ulang dalam masa cooldown akan 409.
+
+**Endpoints:**
+
+| Langkah | Method + Path | Body → Return (di `data`) |
+|---|---|---|
+| 2 | `POST /faucet/usdc/trustline/prepare` | `{ walletAddress }` → `{ xdr }` |
+| 3 | `POST /faucet/usdc/trustline/submit` | `{ walletAddress, signedXdr }` → `{ txHash }` |
+| 4 | `POST /faucet/usdc/claim` | `{ walletAddress }` → `{ txHash, amount, walletAddress }` |
+
+**Catatan Penting:**
+- **Sepenuhnya public** — tidak ada guard auth sama sekali (sama seperti `GET /campaigns`). Jangan kirim bearer token atau cookie; itu akan diabaikan begitu saja.
+- **Langkah 4 tidak butuh tanda tangan wallet** — pembayarannya sepenuhnya ditandatangani platform, karena platform adalah issuer dari aset ini. Hanya langkah trustline yang butuh tanda tangan wallet.
+- **Cooldown, bukan batas keras** — setelah masa cooldown berakhir, wallet yang sama bisa klaim lagi.
+- **Trustline wajib ada sebelum klaim.** Jika langsung memanggil `/claim` pada wallet baru, akan muncul `400` yang meminta Anda memanggil `/trustline/prepare` terlebih dahulu.
+
+---
+
 ## Cheat-sheet Field Status
 
 Panduan tentang status apa saja yang perlu di-*polling* dan apa maknanya, berguna untuk menentukan *loading/empty states* di frontend.
