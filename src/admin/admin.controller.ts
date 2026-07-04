@@ -17,6 +17,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import type { AuthUser } from '../auth/types/auth-user';
+import { ResponseMessage } from '../common/decorators/response-message.decorator';
 import { AdminService } from './admin.service';
 import { RejectKycDto } from './dto/reject-kyc.dto';
 import { RevokeKycDto } from './dto/revoke-kyc.dto';
@@ -29,6 +30,7 @@ export class AdminController {
 
   /** List KYC submissions for review; defaults to PENDING. */
   @Get()
+  @ResponseMessage('KYC submissions retrieved')
   list(@Query('status') status?: string) {
     const resolved = status ?? KycStatus.PENDING;
     if (!Object.values(KycStatus).includes(resolved as KycStatus)) {
@@ -39,6 +41,7 @@ export class AdminController {
 
   @Post(':userId/approve')
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('KYC approved')
   approve(
     @Param('userId', ParseUUIDPipe) userId: string,
     @CurrentUser() admin: AuthUser,
@@ -48,6 +51,7 @@ export class AdminController {
 
   @Post(':userId/reject')
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('KYC rejected')
   reject(
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body() dto: RejectKycDto,
@@ -59,6 +63,7 @@ export class AdminController {
   /** Revoke a previously-approved KYC (expiry/sanction); removes the wallet on-chain. */
   @Post(':userId/revoke')
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('KYC revoked')
   revoke(
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body() dto: RevokeKycDto,

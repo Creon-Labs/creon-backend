@@ -9,6 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import type { Response } from 'express';
+import { ResponseMessage } from '../common/decorators/response-message.decorator';
 import { AuthService } from './auth.service';
 import {
   AUTH_COOKIE_NAME,
@@ -37,6 +38,7 @@ export class AuthController {
   /** Request a challenge message to sign with the wallet. */
   @Post('challenge')
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Challenge created')
   challenge(@Body() dto: ChallengeDto): Promise<{ message: string }> {
     return this.auth.createChallenge(dto.walletAddress);
   }
@@ -46,6 +48,7 @@ export class AuthController {
    * set as an httpOnly cookie; the body only returns the decoded principal.
    */
   @Post('register')
+  @ResponseMessage('Registration successful')
   async register(
     @Body() dto: RegisterDto,
     @Res({ passthrough: true }) res: Response,
@@ -60,6 +63,7 @@ export class AuthController {
    */
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Login successful')
   async login(
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) res: Response,

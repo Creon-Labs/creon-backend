@@ -16,6 +16,7 @@ import { ApprovedInvestorGuard } from '../auth/guards/approved-investor.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import type { AuthUser } from '../auth/types/auth-user';
+import { ResponseMessage } from '../common/decorators/response-message.decorator';
 import { SubmitRefundClaimDto } from './dto/submit-refund-claim.dto';
 import { RefundService } from './refund.service';
 
@@ -32,6 +33,7 @@ export class RefundController {
 
   /** The campaign's refund (status + totals), or null if none was opened. */
   @Get('campaigns/:campaignId/refund')
+  @ResponseMessage('Campaign refund retrieved')
   getForCampaign(@Param('campaignId', ParseUUIDPipe) campaignId: string) {
     return this.refunds.getForCampaign(campaignId);
   }
@@ -41,6 +43,7 @@ export class RefundController {
   /** List the caller's own refund entitlements (with Merkle proofs). */
   @Get('refunds/mine')
   @Roles(Role.INVESTOR)
+  @ResponseMessage('Refund claims retrieved')
   listMine(@CurrentUser() user: AuthUser) {
     return this.refunds.listMyClaims(user.userId);
   }
@@ -50,6 +53,7 @@ export class RefundController {
   @HttpCode(HttpStatus.OK)
   @Roles(Role.INVESTOR)
   @UseGuards(ApprovedInvestorGuard)
+  @ResponseMessage('Refund claim transaction prepared')
   claimPrepare(
     @CurrentUser() user: AuthUser,
     @Param('refundId', ParseUUIDPipe) refundId: string,
@@ -61,6 +65,7 @@ export class RefundController {
   @Post('refunds/:refundId/claim')
   @Roles(Role.INVESTOR)
   @UseGuards(ApprovedInvestorGuard)
+  @ResponseMessage('Refund claim recorded')
   claimSubmit(
     @CurrentUser() user: AuthUser,
     @Param('refundId', ParseUUIDPipe) refundId: string,

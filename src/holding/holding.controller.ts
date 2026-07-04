@@ -11,6 +11,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import type { AuthUser } from '../auth/types/auth-user';
+import { ResponseMessage } from '../common/decorators/response-message.decorator';
 import { HoldingService } from './holding.service';
 
 /**
@@ -25,12 +26,14 @@ export class HoldingController {
   @Get('holdings/mine')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.INVESTOR)
+  @ResponseMessage('Holdings retrieved')
   listMine(@CurrentUser() user: AuthUser) {
     return this.holdings.listMine(user.userId);
   }
 
   /** Public cap table for one campaign (holder identity masked). */
   @Get('campaigns/:id/holdings')
+  @ResponseMessage('Campaign holdings retrieved')
   listForCampaign(@Param('id', ParseUUIDPipe) id: string) {
     return this.holdings.listForCampaign(id);
   }

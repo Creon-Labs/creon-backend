@@ -14,6 +14,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import type { AuthUser } from '../auth/types/auth-user';
+import { ResponseMessage } from '../common/decorators/response-message.decorator';
 import { AdminCampaignService } from './admin-campaign.service';
 import { CancelCampaignDto } from './dto/cancel-campaign.dto';
 
@@ -26,6 +27,7 @@ export class AdminCampaignController {
   /** Cancel a problematic campaign → open a pro-rata refund of the remaining custody. */
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Campaign cancelled')
   cancel(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CancelCampaignDto,

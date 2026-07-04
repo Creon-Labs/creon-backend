@@ -15,6 +15,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import type { AuthUser } from '../auth/types/auth-user';
+import { ResponseMessage } from '../common/decorators/response-message.decorator';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
 import { KycService } from './kyc.service';
 import { UploadedFile } from './uploaded-file';
@@ -30,6 +31,7 @@ export class KycController {
   /** Submit KYC: identity fields + KTP/ID card and selfie images (both required). */
   @Post()
   @Roles(Role.ENTREPRENEUR, Role.INVESTOR)
+  @ResponseMessage('KYC submitted')
   @UseInterceptors(
     FileFieldsInterceptor(
       [
@@ -63,6 +65,7 @@ export class KycController {
   /** The caller's own KYC status. */
   @Get('me')
   @Roles(Role.ENTREPRENEUR, Role.INVESTOR)
+  @ResponseMessage('KYC status retrieved')
   getMine(@CurrentUser() user: AuthUser) {
     return this.kyc.getMine(user.userId);
   }

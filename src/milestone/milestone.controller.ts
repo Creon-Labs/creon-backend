@@ -22,6 +22,7 @@ import { ApprovedInvestorGuard } from '../auth/guards/approved-investor.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import type { AuthUser } from '../auth/types/auth-user';
+import { ResponseMessage } from '../common/decorators/response-message.decorator';
 import type { UploadedFile as MulterFile } from '../kyc/uploaded-file';
 import { CastVoteDto } from './dto/cast-vote.dto';
 import { MilestoneVotingService } from './milestone-voting.service';
@@ -42,12 +43,14 @@ export class MilestoneController {
 
   /** List a campaign's milestones (for the voting UI). `?campaignId=<uuid>`. */
   @Get()
+  @ResponseMessage('Milestones retrieved')
   list(@Query('campaignId', ParseUUIDPipe) campaignId: string) {
     return this.voting.listForCampaign(campaignId);
   }
 
   /** One milestone: detail + running tally + the caller's own vote. */
   @Get(':milestoneId')
+  @ResponseMessage('Milestone retrieved')
   getOne(
     @CurrentUser() user: AuthUser,
     @Param('milestoneId', ParseUUIDPipe) milestoneId: string,
@@ -62,6 +65,7 @@ export class MilestoneController {
   @UseInterceptors(
     FileInterceptor('proof', { limits: { fileSize: MAX_FILE_BYTES } }),
   )
+  @ResponseMessage('Milestone submitted for release')
   submit(
     @CurrentUser() user: AuthUser,
     @Param('milestoneId', ParseUUIDPipe) milestoneId: string,
@@ -81,6 +85,7 @@ export class MilestoneController {
   @Roles(Role.INVESTOR)
   @UseGuards(ApprovedInvestorGuard)
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Vote recorded')
   vote(
     @CurrentUser() user: AuthUser,
     @Param('milestoneId', ParseUUIDPipe) milestoneId: string,

@@ -17,6 +17,7 @@ import { ApprovedInvestorGuard } from '../auth/guards/approved-investor.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import type { AuthUser } from '../auth/types/auth-user';
+import { ResponseMessage } from '../common/decorators/response-message.decorator';
 import { DistributionService } from './distribution.service';
 import { DepositProfitDto } from './dto/deposit-profit.dto';
 import { SubmitTxDto } from './dto/submit-tx.dto';
@@ -38,6 +39,7 @@ export class DistributionController {
   @HttpCode(HttpStatus.OK)
   @Roles(Role.ENTREPRENEUR)
   @UseGuards(ApprovedEntrepreneurGuard)
+  @ResponseMessage('Deposit transaction prepared')
   depositPrepare(
     @CurrentUser() user: AuthUser,
     @Param('campaignId', ParseUUIDPipe) campaignId: string,
@@ -50,6 +52,7 @@ export class DistributionController {
   @Post('campaigns/:campaignId/distributions/deposit')
   @Roles(Role.ENTREPRENEUR)
   @UseGuards(ApprovedEntrepreneurGuard)
+  @ResponseMessage('Profit distribution opened')
   depositSubmit(
     @CurrentUser() user: AuthUser,
     @Param('campaignId', ParseUUIDPipe) campaignId: string,
@@ -60,6 +63,7 @@ export class DistributionController {
 
   /** List a campaign's profit distributions. */
   @Get('campaigns/:campaignId/distributions')
+  @ResponseMessage('Distributions retrieved')
   listForCampaign(@Param('campaignId', ParseUUIDPipe) campaignId: string) {
     return this.distributions.listForCampaign(campaignId);
   }
@@ -69,6 +73,7 @@ export class DistributionController {
   /** List the caller's own entitlements (with Merkle proofs). */
   @Get('distributions/mine')
   @Roles(Role.INVESTOR)
+  @ResponseMessage('Distribution claims retrieved')
   listMine(@CurrentUser() user: AuthUser) {
     return this.distributions.listMyClaims(user.userId);
   }
@@ -78,6 +83,7 @@ export class DistributionController {
   @HttpCode(HttpStatus.OK)
   @Roles(Role.INVESTOR)
   @UseGuards(ApprovedInvestorGuard)
+  @ResponseMessage('Claim transaction prepared')
   claimPrepare(
     @CurrentUser() user: AuthUser,
     @Param('distributionId', ParseUUIDPipe) distributionId: string,
@@ -89,6 +95,7 @@ export class DistributionController {
   @Post('distributions/:distributionId/claim')
   @Roles(Role.INVESTOR)
   @UseGuards(ApprovedInvestorGuard)
+  @ResponseMessage('Claim recorded')
   claimSubmit(
     @CurrentUser() user: AuthUser,
     @Param('distributionId', ParseUUIDPipe) distributionId: string,
