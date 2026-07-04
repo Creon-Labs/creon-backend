@@ -69,6 +69,16 @@ enum CampaignDeployStatus {
   FAILED
 }
 
+// Automatic unlock-trigger state (Campaign-owned, 6th BullMQ orchestrator). unlock()
+// is unconditionally idempotent on-chain, so there is no multi-step resume — just
+// PENDING -> UNLOCKING -> UNLOCKED (FAILED on error, retried from PENDING/FAILED).
+enum UnlockStatus {
+  PENDING
+  UNLOCKING
+  UNLOCKED
+  FAILED
+}
+
 enum VaultStatus {
   PENDING
   FUNDING
@@ -244,6 +254,10 @@ model Campaign {
   wireTxHash      String?              @unique @map("wire_tx_hash") @db.VarChar(64)
   deployError     String?              @map("deploy_error") @db.Text
   deployAttempts  Int                  @default(0) @map("deploy_attempts")
+  unlockStatus    UnlockStatus         @default(PENDING) @map("unlock_status")
+  unlockTxHash    String?              @unique @map("unlock_tx_hash") @db.VarChar(64)
+  unlockError     String?              @map("unlock_error") @db.Text
+  unlockAttempts  Int                  @default(0) @map("unlock_attempts")
   createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz
 
