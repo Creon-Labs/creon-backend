@@ -49,13 +49,16 @@
 | 13 | **Deploy orchestration is backend-driven, async + idempotent — no factory contract** | On approval the backend submits N deploy txs in sequence via a DB state machine (`PENDING → DEPLOYING_TOKEN → DEPLOYING_CAMPAIGN → WIRING → LIVE`), resumable on partial failure (idempotent on the unique `tx_hash` + deterministic salt). A factory adds contract-side complexity not worth it at this scale | ✅ Built (BullMQ on Valkey; `CampaignDeployService` + `CampaignDeployStatus` enum; admin approval is the trigger) |
 | 14 | **Investor onboarding mirrors the entrepreneur flow**: wallet register → KYC → backend whitelists the address; `invest()` is whitelist-gated on-chain | Securities crowdfunding (OJK SCF) requires KYC'd investors; gating in the contract means an unregistered wallet that calls `invest()` directly is *rejected*, not merely discouraged | ✅ Register + KYC (shared role-agnostic `KycProfile`) + on-chain whitelist sync built (`src/kyc/kyc-whitelist.*`, BullMQ: approve→`registry.add`, revoke→`registry.remove`) |
 | 15 | **Refunds via a dedicated on-chain path** (admin-cancel → freeze → pro-rata of the *remaining* custody), **not** a reuse of the dividend distribution | A funded campaign can turn out fraudulent or fail to deliver; investors need their principal back. A distinct `cancel()` / `set_refund()` / `refund_claim()` path (reusing the Merkle machinery) lets cancel **freeze** `invest()` + `release_milestone()` — the load-bearing safety property a dividend can't express — while refunding only what is still in custody (`raised − released`), so it is always executable even after milestones paid the business | ✅ Built (contract path + `src/refund/` BullMQ orchestrator + admin cancel; on `dev`, **pending WASM redeploy**) |
+| 16 | **Unlock is a fully automatic, time-triggered BullMQ orchestrator** (not an admin action) | The contract's `unlock()` is owner-only and stateless (an idempotent bool flag) but never self-triggers off the stored `lock_period` — something has to call it once `lockEndAt` elapses. A reconcile loop (mirrors the milestone-voting `settleExpired` idiom) is simpler and more reliable than requiring an admin to remember | ✅ Built (`src/campaign/campaign-unlock.*`, `UnlockStatus`) |
 
 ### Key distinction to remember: what "lock" actually locks
 Lock applies to **(a) withdrawing principal** and **(b) transferring the share
 token** — **not** to receiving dividends. Dividends (`ProfitDistribution` /
 `DistributionClaim`) can flow during the lock and continue after unlock. After
 unlock the pool's only role would be exit/secondary market (we deferred the AMM),
-so exit is via P2P token transfer to whitelisted addresses.
+so exit is via P2P token transfer to whitelisted addresses. The trigger that
+actually flips this — calling `unlock()` once `lockEndAt` passes — is implemented by
+the `campaign-unlock` BullMQ orchestrator (`UnlockStatus`); see CLAUDE.md for the shape.
 
 ### Permissioned token: who may hold a share, and why invest is gated
 
@@ -243,6 +246,20 @@ What still needs to be built, grouped by area. Check items off as they land.
 - [x] Investor claim relay (`GET /refunds/mine`, `POST /refunds/:id/claim/prepare|claim`) — same prepare/sign/submit shape as dividend `claim()`, no deposit step.
 - [x] CANCELLED guards on the milestone services (release reconcile/drive skip; voting submit/settle skip) so no work is attempted against a frozen contract.
 - [ ] On-chain e2e (needs a funded `STELLAR_PLATFORM_SECRET` + the redeployed WASM).
+
+### I. Unlock trigger
+> Automatic, time-triggered call to the contract's `unlock()` once a campaign's
+> `lockEndAt` elapses. See Decision #16.
+- [x] Schema: `UnlockStatus` enum + `Campaign.unlockStatus/unlockTxHash/unlockError/unlockAttempts`.
+- [x] Sixth BullMQ orchestrator (`src/campaign/campaign-unlock.*`) — `reconcile()`
+      (`@Interval` + boot) finds every `LIVE`, non-cancelled campaign whose
+      `lockEndAt <= now()` and not yet `UNLOCKED`, drives `PENDING → UNLOCKING →
+      UNLOCKED` via `unlock()`. No multi-step resume needed — the call is
+      unconditionally idempotent on-chain.
+- [x] Public API: `unlockStatus`/`unlockTxHash` exposed on `GET /campaigns` /
+      `GET /campaigns/:id`.
+- [ ] On-chain e2e (needs a funded `STELLAR_PLATFORM_SECRET` + a campaign whose lock
+      period has actually elapsed).
 
 ---
 

@@ -20,9 +20,11 @@ claim flow** (Merkle snapshots) are built. The Soroban contracts
 on-chain whitelist — both as idempotent BullMQ orchestrators. Dividends: the business
 deposits profit (relay), a BullMQ orchestrator snapshots holdings → builds a Merkle
 tree → posts `set_distribution`, and investors `claim()` (relay). **Milestone-based
-staged release** (hybrid on-chain `release_milestone` + off-chain weighted voting) and
+staged release** (hybrid on-chain `release_milestone` + off-chain weighted voting),
 an **admin-triggered refund/cancellation** flow (dedicated on-chain
-`cancel`/`set_refund`/`refund_claim`) are also built — both on `dev`, both awaiting the
+`cancel`/`set_refund`/`refund_claim`), and an **automatic post-lock unlock trigger**
+(a sixth BullMQ orchestrator that calls `unlock()` once a campaign's `lockEndAt`
+elapses, with no admin/user action) are also built — all on `dev`, awaiting the
 pending `Campaign` WASM re-upload before on-chain e2e. See `docs/ARCHITECTURE.md`
 (roadmap) and `docs/SMART_CONTRACT_PLAN.md` (phased plan) — Phases 1–6 are done.
 Remaining work is on-chain e2e (needs a funded `STELLAR_PLATFORM_SECRET`) and
@@ -168,8 +170,9 @@ ledger-sequence fields serialize to JSON.
   work. Deploys are **idempotent**: a deterministic per-`(campaign, kind)` salt plus
   an on-chain pre-check (`contractExists`) means a retry recovers the same address
   instead of duplicating.
-- **Five BullMQ orchestrators, one shared shape.** `campaign-deploy`,
-  `kyc-whitelist`, `distribution`, `milestone-release`, and `refund` each have: a `*Service` that is an idempotent,
+- **Six BullMQ orchestrators, one shared shape.** `campaign-deploy`,
+  `kyc-whitelist`, `distribution`, `milestone-release`, `refund`, and `campaign-unlock`
+  each have: a `*Service` that is an idempotent,
   resumable state machine (`drive()`), a thin `*Processor` (`WorkerHost`) that just calls `drive()`
   (a throw fails the job → BullMQ retries with backoff), and a **reconcile loop**
   (`@Interval` every 5 min **and** `onApplicationBootstrap`) that re-enqueues any
@@ -182,6 +185,16 @@ ledger-sequence fields serialize to JSON.
   DEPLOYING_TOKEN → DEPLOYING_CAMPAIGN → WIRING → LIVE` (`FAILED` on error). Steps:
   deploy the `ShareToken`, deploy the `Campaign` contract, `token.set_minter(campaign)`,
   then flip the campaign `LIVE`/`ACTIVE` and the vault `FUNDING`.
+- Campaign unlock trigger (`src/campaign/campaign-unlock.*`, `UnlockStatus`): the
+  sixth orchestrator, and the only one triggered by a wall-clock deadline rather than
+  an external status change (mirrors `MilestoneVotingService.settleExpired`'s
+  date-comparison idiom, folded into the standard reconcile-loop shape). `reconcile()`
+  finds every `LIVE`, non-cancelled campaign whose `lockEndAt` has passed and
+  `unlockStatus !== UNLOCKED`, and drives `PENDING → UNLOCKING → UNLOCKED` (`FAILED`
+  on error) via the owner-only `unlock()` call, which clears the `ShareToken`'s lock
+  flag. Because `unlock()` is unconditionally idempotent on-chain, `drive()` skips the
+  resume-from-persisted-tx-hash dance the other five orchestrators need. A `CANCELLED`
+  campaign is skipped (it exits via Merkle refund claim, not P2P transfer).
 - KYC whitelist sync (`WhitelistStatus`): desired on-chain state is **derived from
   the KYC review status** — APPROVED → `registry.add(wallet)` → WHITELISTED, REVOKED
   → `registry.remove(wallet)` → REMOVED. On-chain add/remove are themselves

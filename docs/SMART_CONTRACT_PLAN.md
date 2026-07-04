@@ -372,9 +372,53 @@ under the old WASM — only new deploys pick up the milestone feature.
 
 ---
 
+## Phase 8 — Automatic unlock trigger
+
+**Goal:** actually call the contract's owner-only `unlock()` once a campaign's
+`lockEndAt` elapses — until now `lock_period` was stored at construction (Phase 1)
+but nothing on- or off-chain ever read it again, so shares never actually became
+transferable without a manual, undocumented intervention.
+
+**Design notes**
+- `unlock()` is **unconditionally idempotent on-chain** (it force-sets the
+  `ShareToken`'s lock flag `false` regardless of its current value), so the
+  orchestrator needs no multi-step resume-from-tx-hash logic like deploy/release/refund.
+- Unlike every other orchestrator, nothing external *tells* the system unlock is
+  due — the reconcile loop itself discovers due work by comparing `lockEndAt` to
+  wall-clock time, mirroring `MilestoneVotingService.settleExpired`'s
+  date-comparison idiom.
+- A `CANCELLED` campaign is skipped: it exits via Merkle refund claim, not P2P
+  share transfer, so unlocking it serves no purpose.
+
+**Deliverables**
+- [x] Schema: `UnlockStatus` enum (`PENDING → UNLOCKING → UNLOCKED`, `FAILED` on
+      error) + `Campaign.unlockStatus/unlockTxHash/unlockError/unlockAttempts`
+      (migration `20260704123625_add_campaign_unlock_state`).
+- [x] Sixth BullMQ orchestrator (`campaign-unlock`, `src/campaign/campaign-unlock.*`):
+      `reconcile()` (`@Interval` every 5 min + `onApplicationBootstrap`, same date
+      filter on both) finds every `LIVE`, non-`CANCELLED` campaign whose
+      `lockEndAt <= now()` and not yet `UNLOCKED`, and drives it through `unlock()`.
+- [x] Public API: `unlockStatus`/`unlockTxHash` exposed on `GET /campaigns` /
+      `GET /campaigns/:id` (`docs/openapi.yaml`, `docs/FRONTEND_FLOWS(.id).md`).
+- [x] Unit tests (`campaign-unlock.service.spec.ts`): due-campaign happy path,
+      not-yet-due guard, `CANCELLED` guard, already-`UNLOCKED` no-op, on-chain
+      failure → `FAILED` + retry, `reconcile()`/bootstrap query shape.
+
+**Acceptance:** a campaign whose lock period has elapsed reaches `unlockStatus:
+UNLOCKED` within one reconcile interval with no manual action, and its `ShareToken`
+becomes P2P-transferable to whitelisted addresses. _(Implemented + unit-tested;
+on-chain e2e pending the same funded `STELLAR_PLATFORM_SECRET` caveat as the other
+phases, plus an actual campaign whose lock period has elapsed on testnet.)_
+
+**Depends on:** Phase 1 (`unlock()` already built) and Phase 2 (deploy
+orchestration, for the `contractAddress` this reads).
+
+---
+
 ## Build order rationale
 
 Riskiest / most foundational first: **Phase 1 proves KYC gating on-chain**, and
 **Phases 1–4 are enough for a demo** ("approve → campaign live → whitelisted investor
 invests, non-KYC rejected on-chain"). Phases 5–6 complete the dividend (bagi hasil)
-story; Phase 7 replaces lump-sum disbursement with milestone-gated staged release.
+story; Phase 7 replaces lump-sum disbursement with milestone-gated staged release;
+Phase 8 closes the loop on the lock period itself by automating `unlock()`.
