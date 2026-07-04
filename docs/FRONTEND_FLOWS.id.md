@@ -9,7 +9,7 @@ Dokumen ini menjelaskan apa saja yang perlu diimplementasikan oleh frontend agar
 2. Menandatangani pesan *raw* UTF-8 → *signature* base64 (untuk autentikasi).
 3. Menandatangani *tx envelope* XDR base64 → *signed* XDR base64 (untuk aksi *on-chain*).
 
-**JWT.** Setiap pemanggilan API yang butuh autentikasi harus menggunakan `Authorization: Bearer <token>`. Token ini di-*mint* saat *register/login*, berisi `{ sub: userId, roles: Role[] }`, dan akan *expired* dalam **7 hari** (`JWT_EXPIRES_IN`). Tidak ada *endpoint* *refresh* — kalau *expired*, jalankan ulang proses *login*.
+**JWT.** *Register/login* mengeset JWT sebagai **cookie httpOnly** (`creon_access_token`) — token ini tidak pernah dikembalikan di *response body* dan tidak bisa dibaca dari JS. Token di-*mint* saat *register/login*, berisi `{ sub: userId, roles: Role[] }`, dan akan *expired* dalam **7 hari** (`JWT_EXPIRES_IN`); `Max-Age` cookie mengikuti masa berlaku ini. Setiap *request* yang butuh autentikasi harus dikirim dengan *credentials* agar browser menyertakan cookie secara otomatis — `fetch(url, { credentials: 'include' })` atau instance axios dengan `withCredentials: true`. Tidak ada *endpoint* *refresh* — kalau *expired*, jalankan ulang proses *login*. `POST /auth/logout` menghapus cookie tersebut (aman dipanggil meskipun cookie sudah *expired*/tidak ada).
 
 **Pola Relay (*prepare* → *sign* → *submit*).** Apapun yang menyentuh saldo USDC/saham (*shares*) milik *user* (`invest`, `deposit_profit`, `claim`) membutuhkan *signature* dari mereka — karena *contract* akan memanggil `require_auth()`. *Platform* tidak bisa menandatanganinya untuk mereka, jadi proses ini selalu terdiri dari tiga langkah:
 1. `POST .../prepare` → backend mengembalikan `{ xdr }` (*unsigned*, *source* = *Wallet* milik *user*).
@@ -31,16 +31,17 @@ Keduanya menggunakan alur *challenge-response* yang sama; hanya *endpoint* akhir
 **Langkah-langkah:**
 1. *Request* sebuah *challenge* menggunakan alamat *Wallet*.
 2. *Wallet* menandatangani `message` yang dikembalikan **sebagai raw bytes** (ini adalah *message signature*, **bukan** transaksi) → `signatureB64`.
-3. Panggil *endpoint* **register** (*user* baru) atau **login** (*user* lama) dengan *signature* tersebut → `accessToken`.
-4. Simpan token tersebut; selalu sertakan `Authorization: Bearer <token>` pada setiap *request* API selanjutnya.
+3. Panggil *endpoint* **register** (*user* baru) atau **login** (*user* lama) dengan *signature* tersebut — JWT diset sebagai cookie httpOnly, dan *body* mengembalikan prinsipal yang terautentikasi (`{ userId, roles }`).
+4. Pastikan *request* yang memanggil register/login (dan setiap *request* setelahnya) dikirim dengan *credentials* (`credentials: 'include'` / `withCredentials: true`) agar cookie tersimpan dan ikut terkirim otomatis. Tidak perlu (dan tidak bisa) menyimpan token di sisi *client*.
 
 **Endpoints:**
 
 | Langkah | Method + Path | Body → Return |
 |---|---|---|
 | 1 | `POST /auth/challenge` | `{ walletAddress }` → `{ message }` (*string multi-line* dengan format tetap) |
-| 3a | `POST /auth/register` | `{ walletAddress, signature, role, email?, displayName? }` → `{ accessToken }` |
-| 3b | `POST /auth/login` | `{ walletAddress, signature }` → `{ accessToken }` |
+| 3a | `POST /auth/register` | `{ walletAddress, signature, role, email?, displayName? }` → `{ userId, roles }` (+ `Set-Cookie: creon_access_token`) |
+| 3b | `POST /auth/login` | `{ walletAddress, signature }` → `{ userId, roles }` (+ `Set-Cookie: creon_access_token`) |
+| — | `POST /auth/logout` | *(tanpa body)* → `204`, menghapus cookie |
 
 **Catatan Penting:**
 - **Challenge hanya berlaku satu kali dan expired dalam 5 menit** (`AUTH_CHALLENGE_TTL_SECONDS`) — segera lakukan *sign*; *request* ulang *challenge* baru jika *register/login* gagal dengan status `401`.

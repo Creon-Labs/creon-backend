@@ -8,13 +8,20 @@ info:
     Indonesian UMKM on Stellar/Soroban.
 
     ## Authentication
-    All protected endpoints require a JWT bearer token obtained via
-    `POST /auth/login` or `POST /auth/register`.
+    `POST /auth/login` or `POST /auth/register` set the JWT as an **httpOnly
+    cookie** (`creon_access_token`) — it is not returned in the response body.
+    Browser clients must send credentialed requests (`credentials: 'include'`
+    for `fetch`, `withCredentials: true` for axios) so the cookie is attached
+    automatically; a `Authorization: Bearer <token>` header also still works
+    for non-browser clients that read the token from the `Set-Cookie` response
+    header. `POST /auth/logout` clears the cookie.
 
     ### Wallet challenge-response flow
     1. `POST /auth/challenge` → receive a nonce message
     2. Sign the message with your Stellar secret key (Ed25519)
-    3. `POST /auth/register` (first time) or `POST /auth/login` with the signature
+    3. `POST /auth/register` (first time) or `POST /auth/login` with the
+       signature — the JWT cookie is set on success and the body returns the
+       authenticated principal (`userId`, `roles`)
 
 servers:
   - url: http://localhost:3000
@@ -99,6 +106,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: creon_access_token
 
   schemas:
     # ── Enums ──────────────────────────────────────────────────────────────────
@@ -495,13 +506,20 @@ components:
           description: Nonce string to sign with the Stellar secret key
           example: "Sign this message to authenticate with Creon: a3f8c1d2e9b7"
 
-    TokenResponse:
+    AuthPrincipalResponse:
       type: object
-      required: [ accessToken ]
+      required: [ userId, roles ]
+      description: |
+        Returned by register/login after the JWT is set as an httpOnly cookie
+        (`creon_access_token`) — the token itself is never in the body.
       properties:
-        accessToken:
+        userId:
           type: string
-          description: JWT bearer token; payload contains `sub` (userId) and `roles`
+          format: uuid
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
 
     KycSubmitResponse:
       type: object
@@ -1513,7 +1531,10 @@ paths:
         - Pastikan sudah memanggil `/auth/challenge` sebelumnya.
         - Kirim role (`ENTREPRENEUR` atau `INVESTOR`).
         - Jika role `ENTREPRENEUR`, wajib mengirimkan `email`.
-        - Jika berhasil, akan mengembalikan token JWT untuk autentikasi endpoint lain.
+        - Jika berhasil, token JWT diset sebagai httpOnly cookie
+          (`creon_access_token`) — body hanya berisi `userId` dan `roles`.
+          Gunakan `credentials: 'include'` (fetch) / `withCredentials: true`
+          (axios) agar cookie ikut terkirim di request berikutnya.
       operationId: authRegister
       security: []
       requestBody:
@@ -1524,11 +1545,11 @@ paths:
               $ref: '#/components/schemas/RegisterRequest'
       responses:
         '201':
-          description: Account created — JWT returned
+          description: Account created — JWT set as an httpOnly cookie
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TokenResponse'
+                $ref: '#/components/schemas/AuthPrincipalResponse'
         '400':
           description: Validation error or invalid signature
           content:
@@ -1552,7 +1573,10 @@ paths:
         **Untuk Frontend:**
         - Pastikan sudah memanggil `/auth/challenge` sebelumnya.
         - Kirim hasil tanda tangan ke endpoint ini.
-        - Jika berhasil, simpan token JWT yang dikembalikan untuk mengakses endpoint yang membutuhkan autentikasi.
+        - Jika berhasil, token JWT diset sebagai httpOnly cookie
+          (`creon_access_token`) — body hanya berisi `userId` dan `roles`.
+          Gunakan `credentials: 'include'` (fetch) / `withCredentials: true`
+          (axios) agar cookie ikut terkirim di request berikutnya.
       operationId: authLogin
       security: []
       requestBody:
@@ -1563,11 +1587,11 @@ paths:
               $ref: '#/components/schemas/LoginRequest'
       responses:
         '200':
-          description: Authenticated — JWT returned
+          description: Authenticated — JWT set as an httpOnly cookie
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TokenResponse'
+                $ref: '#/components/schemas/AuthPrincipalResponse'
         '400':
           description: Invalid signature or expired challenge
           content:
@@ -1580,6 +1604,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/logout:
+    post:
+      tags: [ auth ]
+      summary: Logout
+      description: |
+        Menghapus cookie autentikasi (`creon_access_token`). Tidak memerlukan
+        autentikasi dan aman dipanggil berulang kali (idempotent) — JWT di
+        sistem ini stateless, jadi logout murni instruksi ke browser untuk
+        menghapus cookie-nya, bahkan jika cookie sudah tidak ada/kedaluwarsa.
+      operationId: authLogout
+      security: []
+      responses:
+        '204':
+          description: Cookie cleared
 
   /kyc:
     post:

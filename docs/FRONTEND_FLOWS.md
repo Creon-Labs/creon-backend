@@ -9,7 +9,7 @@ This document outlines what the frontend needs to implement to integrate seamles
 2. Signing a raw UTF-8 message → returning a base64 signature (used for authentication).
 3. Signing a base64 XDR transaction envelope → returning a signed base64 XDR (used for on-chain actions).
 
-**JWT.** Every authenticated API call requires an `Authorization: Bearer <token>` header. This token is minted during registration/login, contains `{ sub: userId, roles: Role[] }`, and expires in **7 days** (`JWT_EXPIRES_IN`). There is no refresh endpoint — once it expires, prompt the user to log in again.
+**JWT.** Register/login set the JWT as an **httpOnly cookie** (`creon_access_token`) — it is never returned in the response body and cannot be read from JS. The token is minted during registration/login, contains `{ sub: userId, roles: Role[] }`, and expires in **7 days** (`JWT_EXPIRES_IN`); the cookie's `Max-Age` matches. Every authenticated request must be sent with credentials so the browser attaches the cookie automatically — `fetch(url, { credentials: 'include' })` or an axios instance with `withCredentials: true`. There is no refresh endpoint — once it expires, prompt the user to log in again. `POST /auth/logout` clears the cookie (safe to call even if already expired/absent).
 
 **The Relay Pattern (Prepare → Sign → Submit).** Any action involving the user's USDC or shares (`invest`, `deposit_profit`, `claim`) requires *their* signature, as the smart contract enforces `require_auth()`. The platform cannot sign on their behalf. Therefore, these actions always follow a three-step process:
 1. `POST .../prepare` → The backend returns `{ xdr }` (unsigned, source = user's Wallet).
@@ -31,16 +31,17 @@ Both registration and login use the exact same challenge-response flow; only the
 **Steps:**
 1. Request a challenge payload for the user's Wallet address.
 2. The Wallet signs the returned `message` **as raw bytes** (this is a message signature, *not* a transaction) → `signatureB64`.
-3. Call **register** (for new users) or **login** (for returning users) using the signature → `accessToken`.
-4. Store the token securely and attach `Authorization: Bearer <token>` to all subsequent requests.
+3. Call **register** (for new users) or **login** (for returning users) using the signature — the JWT is set as an httpOnly cookie, and the body returns the authenticated principal (`{ userId, roles }`).
+4. Make sure the request that called register/login (and every request after it) is sent with credentials (`credentials: 'include'` / `withCredentials: true`) so the cookie is stored and re-sent automatically. No client-side token storage needed or possible.
 
 **Endpoints:**
 
 | Step | Method + Path | Body → Returns |
 |---|---|---|
 | 1 | `POST /auth/challenge` | `{ walletAddress }` → `{ message }` (fixed-format multi-line string) |
-| 3a | `POST /auth/register` | `{ walletAddress, signature, role, email?, displayName? }` → `{ accessToken }` |
-| 3b | `POST /auth/login` | `{ walletAddress, signature }` → `{ accessToken }` |
+| 3a | `POST /auth/register` | `{ walletAddress, signature, role, email?, displayName? }` → `{ userId, roles }` (+ `Set-Cookie: creon_access_token`) |
+| 3b | `POST /auth/login` | `{ walletAddress, signature }` → `{ userId, roles }` (+ `Set-Cookie: creon_access_token`) |
+| — | `POST /auth/logout` | *(no body)* → `204`, clears the cookie |
 
 **Caveats:**
 - **The challenge is single-use and expires in 5 minutes** (`AUTH_CHALLENGE_TTL_SECONDS`). Prompt the user to sign promptly. If register/login fails with a `401`, request a fresh challenge.
