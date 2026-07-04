@@ -7,6 +7,16 @@ info:
     Backend API for **Creon** — a Web3 crowdfunding (urun dana) platform for
     Indonesian UMKM on Stellar/Soroban.
 
+    ## Response envelope
+    Every JSON response is wrapped in a consistent envelope. Success:
+    `{ statusCode, message, data }` — `data` holds exactly the resource shape
+    documented per endpoint below; `message` is a short, human-readable string
+    not meant for client-side branching (branch on `statusCode` / `data`
+    instead). Errors: `{ statusCode, message, error, data: null }` — same
+    `message`/`error` as before, now always paired with `data: null`. The one
+    exception is `204 No Content` (`POST /auth/logout`), which has a
+    genuinely empty body — no envelope.
+
     ## Authentication
     `POST /auth/login` or `POST /auth/register` set the JWT as an **httpOnly
     cookie** (`creon_access_token`) — it is not returned in the response body.
@@ -1436,7 +1446,7 @@ components:
 
     ErrorResponse:
       type: object
-      required: [ statusCode, message ]
+      required: [ statusCode, message, data ]
       properties:
         statusCode:
           type: integer
@@ -1451,6 +1461,25 @@ components:
         error:
           type: string
           example: Bad Request
+        data:
+          type: 'null'
+          example: null
+
+    Envelope:
+      type: object
+      description: |
+        Shared success envelope every JSON response is wrapped in (except
+        `204 No Content`, which has a genuinely empty body). `data` is
+        overridden per-endpoint below to the actual payload shape.
+      required: [ statusCode, message, data ]
+      properties:
+        statusCode:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: Success
+        data: {}
 
   responses:
     Unauthorized:
@@ -1512,7 +1541,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ChallengeResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ChallengeResponse'
         '400':
           description: Invalid wallet address
           content:
@@ -1549,7 +1583,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthPrincipalResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthPrincipalResponse'
         '400':
           description: Validation error or invalid signature
           content:
@@ -1591,7 +1630,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthPrincipalResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthPrincipalResponse'
         '400':
           description: Invalid signature or expired challenge
           content:
@@ -1671,7 +1715,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/KycSubmitResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/KycSubmitResponse'
         '400':
           description: Missing files, wrong MIME type, or validation error
           content:
@@ -1708,7 +1757,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/KycProfile'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/KycProfile'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1746,9 +1800,14 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/AdminKycItem'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AdminKycItem'
         '400':
           description: Invalid status value
           content:
@@ -1787,7 +1846,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminApproveResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AdminApproveResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1834,7 +1898,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminRejectResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AdminRejectResponse'
         '400':
           description: Missing or invalid reason
           content:
@@ -1886,7 +1955,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminRevokeResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AdminRevokeResponse'
         '400':
           description: Missing or invalid reason
           content:
@@ -1931,9 +2005,14 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/AdminProposalItem'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AdminProposalItem'
         '400':
           description: Invalid status value
           content:
@@ -1972,7 +2051,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminApproveProposalResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AdminApproveProposalResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2018,7 +2102,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminRejectProposalResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AdminRejectProposalResponse'
         '400':
           description: Missing or invalid reason
           content:
@@ -2071,7 +2160,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminCancelCampaignResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AdminCancelCampaignResponse'
         '400':
           description: Missing or invalid reason
           content:
@@ -2116,7 +2210,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Proposal'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Proposal'
         '400':
           description: Validation error (e.g. requestedAmount ≤ 0)
           content:
@@ -2144,9 +2243,14 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Proposal'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Proposal'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2178,7 +2282,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Proposal'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Proposal'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2217,7 +2326,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Proposal'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Proposal'
         '400':
           description: Validation error
           content:
@@ -2263,7 +2377,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Proposal'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Proposal'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2295,9 +2414,14 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Campaign'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Campaign'
 
   /campaigns/{id}:
     get:
@@ -2325,7 +2449,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Campaign'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Campaign'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -2355,9 +2484,14 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/CampaignHolding'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/CampaignHolding'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -2396,7 +2530,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PrepareInvestmentResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PrepareInvestmentResponse'
         '400':
           description: Validation error (e.g. amount ≤ 0)
           content:
@@ -2450,7 +2589,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Investment'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Investment'
         '400':
           description: |
             Malformed XDR, or the tx does not match the expected `invest()` for
@@ -2490,9 +2634,14 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Investment'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Investment'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2517,9 +2666,14 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Holding'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Holding'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2558,7 +2712,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PrepareDepositResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PrepareDepositResponse'
         '400':
           description: Validation error (e.g. amount ≤ 0)
           content:
@@ -2611,7 +2770,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProfitDistribution'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ProfitDistribution'
         '400':
           description: |
             Malformed XDR, or the tx does not match the expected `deposit_profit()`
@@ -2659,9 +2823,14 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ProfitDistribution'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ProfitDistribution'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -2685,9 +2854,14 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/DistributionClaim'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DistributionClaim'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2721,7 +2895,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PrepareClaimResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PrepareClaimResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2767,7 +2946,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DistributionClaim'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DistributionClaim'
         '400':
           description: |
             Malformed XDR, or the tx does not match the expected `claim()` for this
@@ -2816,9 +3000,14 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Milestone'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Milestone'
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -2849,7 +3038,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MilestoneDetail'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MilestoneDetail'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -2894,7 +3088,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Milestone'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Milestone'
         '400':
           description: Missing proof file, or wrong file type
           content:
@@ -2954,7 +3153,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MilestoneVoteResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MilestoneVoteResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3000,9 +3204,14 @@ paths:
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: '#/components/schemas/Refund'
-                  - type: 'null'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - $ref: '#/components/schemas/Refund'
+                          - type: 'null'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -3026,9 +3235,14 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/RefundClaim'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RefundClaim'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3060,7 +3274,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PrepareRefundClaimResponse'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PrepareRefundClaimResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3106,7 +3325,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RefundClaim'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RefundClaim'
         '400':
           description: |
             Malformed XDR, or the tx does not match the expected `refund_claim()` for

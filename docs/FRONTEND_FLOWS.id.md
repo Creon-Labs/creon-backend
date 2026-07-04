@@ -11,6 +11,8 @@ Dokumen ini menjelaskan apa saja yang perlu diimplementasikan oleh frontend agar
 
 **JWT.** *Register/login* mengeset JWT sebagai **cookie httpOnly** (`creon_access_token`) — token ini tidak pernah dikembalikan di *response body* dan tidak bisa dibaca dari JS. Token di-*mint* saat *register/login*, berisi `{ sub: userId, roles: Role[] }`, dan akan *expired* dalam **7 hari** (`JWT_EXPIRES_IN`); `Max-Age` cookie mengikuti masa berlaku ini. Setiap *request* yang butuh autentikasi harus dikirim dengan *credentials* agar browser menyertakan cookie secara otomatis — `fetch(url, { credentials: 'include' })` atau instance axios dengan `withCredentials: true`. Tidak ada *endpoint* *refresh* — kalau *expired*, jalankan ulang proses *login*. `POST /auth/logout` menghapus cookie tersebut (aman dipanggil meskipun cookie sudah *expired*/tidak ada).
 
+**Response Envelope.** Setiap response JSON dibungkus dalam struktur yang konsisten. Sukses: `{ statusCode, message, data }` — `data` berisi persis payload yang ditampilkan di kolom "Return" di bawah (bentuknya tidak berubah); `message` adalah string singkat yang ramah dibaca manusia per-*endpoint*, bukan untuk logika percabangan di *client* (gunakan `statusCode` / `data` untuk itu). Error: `{ statusCode, message, error, data: null }` — `message`/`error` sama seperti sebelumnya, sekarang selalu disertai `data: null`. Satu-satunya pengecualian adalah `204 No Content` (`POST /auth/logout`), yang tetap memiliki *body* yang benar-benar kosong.
+
 **Pola Relay (*prepare* → *sign* → *submit*).** Apapun yang menyentuh saldo USDC/saham (*shares*) milik *user* (`invest`, `deposit_profit`, `claim`) membutuhkan *signature* dari mereka — karena *contract* akan memanggil `require_auth()`. *Platform* tidak bisa menandatanganinya untuk mereka, jadi proses ini selalu terdiri dari tiga langkah:
 1. `POST .../prepare` → backend mengembalikan `{ xdr }` (*unsigned*, *source* = *Wallet* milik *user*).
 2. *Wallet* menandatangani XDR **sama persis** seperti yang dikembalikan (jangan dimodifikasi) → *signed* XDR.
@@ -36,7 +38,7 @@ Keduanya menggunakan alur *challenge-response* yang sama; hanya *endpoint* akhir
 
 **Endpoints:**
 
-| Langkah | Method + Path | Body → Return |
+| Langkah | Method + Path | Body → Return (di `data`) |
 |---|---|---|
 | 1 | `POST /auth/challenge` | `{ walletAddress }` → `{ message }` (*string multi-line* dengan format tetap) |
 | 3a | `POST /auth/register` | `{ walletAddress, signature, role, email?, displayName? }` → `{ userId, roles }` (+ `Set-Cookie: creon_access_token`) |
@@ -61,7 +63,7 @@ Proses *submit* dilakukan secara *off-chain*, alurnya sama persis untuk *Entrepr
 
 **Endpoints:**
 
-| Langkah | Method + Path | Body → Return |
+| Langkah | Method + Path | Body → Return (di `data`) |
 |---|---|---|
 | 1 | `POST /kyc` (multipart) | fields: `fullName`, `nationalId` (NIK 16-digit), `dateOfBirth?` (YYYY-MM-DD); files: `idCard`, `selfie` (jpeg/png, ≤5MB) → `{ status: "PENDING", submittedAt }` |
 | 2 | `GET /kyc/me` | → `{ status: "PENDING" \| "APPROVED" \| "REJECTED" \| "REVOKED", ... }` |
@@ -139,7 +141,7 @@ Menggunakan Pola Relay (lihat bagian Konsep Utama). Membutuhkan *role* `INVESTOR
 
 **Endpoints:**
 
-| Langkah | Method + Path | Body → Return |
+| Langkah | Method + Path | Body → Return (di `data`) |
 |---|---|---|
 | 1 | `POST /campaigns/:campaignId/investments/prepare` | `{ amount }` → `{ campaignId, xdr }` |
 | 3 | `POST /campaigns/:campaignId/investments` | `{ signedXdr }` → `Investment { id, campaignId, amount, lpTokens, txHash, status, investedAt }` |
@@ -168,7 +170,7 @@ Menggunakan Pola Relay. Membutuhkan *role* `ENTREPRENEUR` + KYC yang disetujui, 
 
 **Endpoints:**
 
-| Langkah | Method + Path | Body → Return |
+| Langkah | Method + Path | Body → Return (di `data`) |
 |---|---|---|
 | 1 | `POST /campaigns/:campaignId/distributions/deposit/prepare` | `{ amount }` → `{ campaignId, xdr }` |
 | 3 | `POST /campaigns/:campaignId/distributions/deposit` | `{ signedXdr }` → `ProfitDistribution { id, onchainId, totalAmount, status: "PENDING", ... }` |
@@ -194,7 +196,7 @@ Menggunakan Pola Relay. Membutuhkan *role* `INVESTOR` + KYC yang disetujui.
 
 **Endpoints:**
 
-| Langkah | Method + Path | Body → Return |
+| Langkah | Method + Path | Body → Return (di `data`) |
 |---|---|---|
 | 1 | `GET /distributions/mine` | `DistributionClaim[] { id, distributionId, amount, status, distribution: { onchainId, campaignId, status } }` |
 | 2 | `POST /distributions/:distributionId/claim/prepare` | (tanpa body) → `{ distributionId, xdr }` |
@@ -220,7 +222,7 @@ Milestone mengatur **pencairan bertahap dana pokok (principal)** yang terkumpul 
 
 **Endpoints:**
 
-| Langkah | Method + Path | Body → Return |
+| Langkah | Method + Path | Body → Return (di `data`) |
 |---|---|---|
 | - | `GET /milestones?campaignId=<uuid>` | Daftar milestone suatu Campaign, terurut (bersifat *public*). |
 | - | `GET /milestones/:milestoneId` | Detail + hasil hitung suara (*tally*) yang berjalan + suara milik pemanggil API + `proofUrl` yang sudah di-*presign*. |
@@ -249,7 +251,7 @@ Untuk sebuah Campaign yang bermasalah (penipuan, bisnis gagal, dsb.), seorang ad
 
 **Endpoints:**
 
-| Langkah | Method + Path | Body → Return |
+| Langkah | Method + Path | Body → Return (di `data`) |
 |---|---|---|
 | 2 | `GET /campaigns/:campaignId/refund` | Bersifat *public* → `Refund { id, campaignId, reason, totalAmount, totalShares, totalClaimed, merkleRoot, snapshotLedger, status, createdAt }`, atau `null` jika Campaign tersebut tidak pernah dibatalkan. |
 | 3 | `GET /refunds/mine` | `RefundClaim[] { id, refundId, shareAmount, amount, leafIndex, merkleProof, claimTxHash, status, claimedAt, createdAt, refund: { campaignId, status } }` |
@@ -287,7 +289,7 @@ Panduan tentang status apa saja yang perlu di-*polling* dan apa maknanya, bergun
 
 ## Konvensi Error Handling
 
-- **Error yang digunakan adalah Standard Nest HTTP exceptions** dengan struktur body `{ statusCode, message, error }`:
+- **Error yang digunakan adalah Standard Nest HTTP exceptions** dengan struktur body `{ statusCode, message, error, data: null }`:
   `400` (validasi/*bad state*), `401` (JWT atau *Wallet signature* salah/hilang/*expired*), `403` (terblokir *role* atau validasi KYC), `404` (tidak ditemukan / bukan milik *user*), `409` (konflik data — *Campaign* tidak bisa di-*invest*, NIK sudah dipakai, klaim sudah di-*claim* sebelumnya).
 - **`ValidationPipe` menerapkan fungsi `whitelist`** yang otomatis membuang struktur body (field) yang tidak diketahui dan memaksa tipe data (*type coercion*) — jangan bergantung pada *backend* untuk menolak data ekstra, tetapi Anda wajib mengirim tipe nilai yang benar (angka sebagai `number`, nilai nominal uang sebagai `string`).
 - **Segala kegagalan di siklus `/prepare` → sign → `/submit` sangat aman untuk diulang (retry) dari tahap `/prepare`** — tidak akan ada data tersimpan (*persists*) sampai proses *submit* benar-benar sukses.

@@ -11,6 +11,8 @@ This document outlines what the frontend needs to implement to integrate seamles
 
 **JWT.** Register/login set the JWT as an **httpOnly cookie** (`creon_access_token`) — it is never returned in the response body and cannot be read from JS. The token is minted during registration/login, contains `{ sub: userId, roles: Role[] }`, and expires in **7 days** (`JWT_EXPIRES_IN`); the cookie's `Max-Age` matches. Every authenticated request must be sent with credentials so the browser attaches the cookie automatically — `fetch(url, { credentials: 'include' })` or an axios instance with `withCredentials: true`. There is no refresh endpoint — once it expires, prompt the user to log in again. `POST /auth/logout` clears the cookie (safe to call even if already expired/absent).
 
+**Response Envelope.** Every JSON response is wrapped in a consistent shape. Success: `{ statusCode, message, data }` — `data` holds exactly the payload shown in the "Returns" column below (unchanged in shape); `message` is a short, human-readable, per-endpoint string not meant for branching logic (branch on `statusCode` / `data` instead). Errors: `{ statusCode, message, error, data: null }` — same `message`/`error` as before, now always paired with `data: null`. The one exception is `204 No Content` (`POST /auth/logout`), which still has a completely empty body.
+
 **The Relay Pattern (Prepare → Sign → Submit).** Any action involving the user's USDC or shares (`invest`, `deposit_profit`, `claim`) requires *their* signature, as the smart contract enforces `require_auth()`. The platform cannot sign on their behalf. Therefore, these actions always follow a three-step process:
 1. `POST .../prepare` → The backend returns `{ xdr }` (unsigned, source = user's Wallet).
 2. The Wallet signs that **exact** XDR (do not modify it!) → returns the signed XDR.
@@ -36,7 +38,7 @@ Both registration and login use the exact same challenge-response flow; only the
 
 **Endpoints:**
 
-| Step | Method + Path | Body → Returns |
+| Step | Method + Path | Body → Returns (in `data`) |
 |---|---|---|
 | 1 | `POST /auth/challenge` | `{ walletAddress }` → `{ message }` (fixed-format multi-line string) |
 | 3a | `POST /auth/register` | `{ walletAddress, signature, role, email?, displayName? }` → `{ userId, roles }` (+ `Set-Cookie: creon_access_token`) |
@@ -61,7 +63,7 @@ This is a purely off-chain submission. The process is identical for both Entrepr
 
 **Endpoints:**
 
-| Step | Method + Path | Body → Returns |
+| Step | Method + Path | Body → Returns (in `data`) |
 |---|---|---|
 | 1 | `POST /kyc` (multipart) | fields: `fullName`, `nationalId` (16-digit NIK), `dateOfBirth?` (YYYY-MM-DD); files: `idCard`, `selfie` (jpeg/png, ≤5MB) → `{ status: "PENDING", submittedAt }` |
 | 2 | `GET /kyc/me` | → `{ status: "PENDING" \| "APPROVED" \| "REJECTED" \| "REVOKED", ... }` |
@@ -139,7 +141,7 @@ This utilizes the Relay Pattern (see Core Concepts). It requires the `INVESTOR` 
 
 **Endpoints:**
 
-| Step | Method + Path | Body → Returns |
+| Step | Method + Path | Body → Returns (in `data`) |
 |---|---|---|
 | 1 | `POST /campaigns/:campaignId/investments/prepare` | `{ amount }` → `{ campaignId, xdr }` |
 | 3 | `POST /campaigns/:campaignId/investments` | `{ signedXdr }` → `Investment { id, campaignId, amount, lpTokens, txHash, status, investedAt }` |
@@ -168,7 +170,7 @@ This utilizes the Relay Pattern. It requires the `ENTREPRENEUR` role + approved 
 
 **Endpoints:**
 
-| Step | Method + Path | Body → Returns |
+| Step | Method + Path | Body → Returns (in `data`) |
 |---|---|---|
 | 1 | `POST /campaigns/:campaignId/distributions/deposit/prepare` | `{ amount }` → `{ campaignId, xdr }` |
 | 3 | `POST /campaigns/:campaignId/distributions/deposit` | `{ signedXdr }` → `ProfitDistribution { id, onchainId, totalAmount, status: "PENDING", ... }` |
@@ -194,7 +196,7 @@ This utilizes the Relay Pattern. It requires the `INVESTOR` role + approved KYC.
 
 **Endpoints:**
 
-| Step | Method + Path | Body → Returns |
+| Step | Method + Path | Body → Returns (in `data`) |
 |---|---|---|
 | 1 | `GET /distributions/mine` | `DistributionClaim[] { id, distributionId, amount, status, distribution: { onchainId, campaignId, status } }` |
 | 2 | `POST /distributions/:distributionId/claim/prepare` | (No body) → `{ distributionId, xdr }` |
@@ -220,7 +222,7 @@ Milestones govern **staged release of the raised principal** — distinct from F
 
 **Endpoints:**
 
-| Step | Method + Path | Body → Returns |
+| Step | Method + Path | Body → Returns (in `data`) |
 |---|---|---|
 | - | `GET /milestones?campaignId=<uuid>` | Lists a Campaign's milestones, ordered (public read). |
 | - | `GET /milestones/:milestoneId` | Detail + running vote tally + the caller's own vote + a presigned `proofUrl`. |
@@ -249,7 +251,7 @@ For a problematic Campaign (fraud, business failure, etc.), an admin can cancel 
 
 **Endpoints:**
 
-| Step | Method + Path | Body → Returns |
+| Step | Method + Path | Body → Returns (in `data`) |
 |---|---|---|
 | 2 | `GET /campaigns/:campaignId/refund` | Public → `Refund { id, campaignId, reason, totalAmount, totalShares, totalClaimed, merkleRoot, snapshotLedger, status, createdAt }`, or `null` if the Campaign was never cancelled. |
 | 3 | `GET /refunds/mine` | `RefundClaim[] { id, refundId, shareAmount, amount, leafIndex, merkleProof, claimTxHash, status, claimedAt, createdAt, refund: { campaignId, status } }` |
@@ -287,7 +289,7 @@ A quick reference for what to poll and what each status means (highly useful for
 
 ## Error Handling Conventions
 
-- **Standard Nest HTTP Exceptions:** Expect responses formatted as `{ statusCode, message, error }`.
+- **Standard Nest HTTP Exceptions:** Expect responses formatted as `{ statusCode, message, error, data: null }`.
   - `400`: Validation error or bad request state.
   - `401`: Missing, invalid, or expired JWT / Wallet signature.
   - `403`: Role check or KYC gate failed.
