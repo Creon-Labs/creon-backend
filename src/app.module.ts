@@ -22,6 +22,7 @@ import { HoldingModule } from './holding/holding.module';
 import { DistributionModule } from './distribution/distribution.module';
 import { MilestoneModule } from './milestone/milestone.module';
 import { RefundModule } from './refund/refund.module';
+import { FaucetModule } from './faucet/faucet.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { RefundModule } from './refund/refund.module';
     DistributionModule,
     MilestoneModule,
     RefundModule,
+    FaucetModule,
   ],
   controllers: [AppController],
   providers: [
