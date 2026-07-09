@@ -10,7 +10,7 @@
 Expert (testnet) to prove on-chain state.
 **Language:** English narration; Indonesian domain terms (*bagi hasil*, *urun dana*,
 UMKM, NIK) kept on-screen for local authenticity.
-**Target length:** ~4–5 minutes.
+**Target length:** ~2.5–3 minutes.
 **Cast (three personas):** **Entrepreneur** (UMKM owner), **Investor**, **Admin**
 (platform reviewer).
 
@@ -18,15 +18,21 @@ UMKM, NIK) kept on-screen for local authenticity.
 
 ## 0. Read this first — what is real vs. narrated
 
-Keep the demo honest; judges will check. On testnet (verified 2026-07-02):
+Keep the demo honest; judges will check. On testnet (all 9 core flows verified
+end-to-end 2026-07-03, automatic unlock verified 2026-07-04):
 
 - ✅ **Verified on-chain:** a non-whitelisted `invest()` **reverts**; a whitelisted
   `invest()` receives shares via gated `mint`; a **forged Merkle proof on `claim()`
-  is rejected**. Invest and dividend deposit/claim are the exercised on-chain paths.
-- ⚠️ **Milestone release** is implemented + unit-tested, but the deployed Campaign
-  WASM predates the milestone constructor (redeploy pending). → Show the **voting UX**
-  (real, off-chain) and *narrate* the on-chain gate; **do not** claim a live release
-  on camera.
+  is rejected**; **milestone release** (share-weighted vote → sequential on-chain
+  `release_milestone`); **refund** (admin `cancel()` freezes the contract →
+  Merkle `refund_claim` returns principal); **automatic unlock** (time-triggered
+  `unlock()` with zero admin/user action). Everything narrated is real — but in
+  this short cut the **refund** and **auto-unlock** are *narrated over* status
+  shots rather than walked through live (no time for a second full flow).
+- ⚠️ The milestone + refund paths require campaigns deployed from the **re-uploaded**
+  Campaign WASM (`d867b498…`, uploaded 2026-07-03). Campaigns deployed before that
+  date run the old WASM (`462eb8f0…`) and lack these entrypoints — deploy fresh
+  campaigns during the dry-run.
 - Source of truth for addresses is `contracts/deployments/testnet.json` (below), **not**
   the older address in `SMART_CONTRACT_PLAN.md`.
 
@@ -54,8 +60,11 @@ use real keypairs)
       whose `walletAddress` is a real key you control
 
 **Dry-run once** (produces the real hashes you'll show)
-- [ ] Onboard → approve KYC → proposal → approve/deploy → invest → deposit profit →
-      claim, end to end. Save the contract addresses + tx hashes for the explorer cutaways.
+- [ ] Onboard → approve KYC → proposal → approve/deploy → invest → milestone vote +
+      release → deposit profit → claim, end to end. Save the contract addresses + tx
+      hashes for the explorer cutaways. (Campaigns must be deployed fresh — only
+      campaigns from the 2026-07-03 WASM `d867b498…` have the milestone/refund
+      entrypoints. `scripts/e2e/` has reusable funded wallets + a full-flow driver.)
 
 ---
 
@@ -64,160 +73,149 @@ use real keypairs)
 Each row: what's on screen → what you click → what to say → the endpoint + on-chain
 effect behind it (for a lower-third caption or B-roll).
 
-### Scene 0 — Cold open · the problem (~0:00–0:25)
-- **On screen:** Title card "Creon — *urun dana* for UMKM, on Stellar." One-line problem.
-- **Action:** Hold on the title; cut to a live campaign card.
-- **Narration:** *"63 million Indonesian small businesses—UMKM—struggle to raise
-  capital. Retail investors want to help, but face two massive trust gaps: 'Will the
+**Pacing rule for the short cut:** only **three explorer cutaways** in the whole
+video — registry `add` (Scene 1), `invest` (Scene 3), `claim` (Scene 5). Everything
+else is shown as UI status changes so the pace never drags.
+
+### Scene 0 — Cold open · the problem (~0:00–0:20)
+- **On screen:** Title card "Creon — *urun dana* for UMKM, on Stellar." Then three
+  big stat callouts: **63 million UMKM · 61% of GDP · 97% of jobs** (all three stay
+  on-screen; only the first two are spoken).
+- **Action:** Hold on the title; land the stats; cut to a live campaign card.
+- **Narration:** *"UMKM—Indonesia's micro and small businesses—are the backbone of
+  the economy: 63 million of them, producing over 60% of GDP. Yet most can't access
+  formal financing, and investors who want to help face two trust gaps: 'Will the
   money be used as promised?' and 'Will I actually get my fair share of the profit?'.
-  Creon solves both using Stellar smart contracts."*
+  Creon solves both with Stellar smart contracts."*
 - **Behind the scenes:** —
 
-### Scene 1 — Onboarding: wallet + KYC (~0:25–1:05)
+### Scene 1 — Wallet + KYC → on-chain whitelist (~0:20–0:50)
 - **On screen:** Connect Stellar wallet → KYC form (name, 16-digit **NIK**, ID card +
-  selfie upload).
-- **Action:** Connect wallet (no password); fill KYC; submit. Show status = PENDING.
-- **Narration:** *"Let's see it in action. Users sign in instantly with their Stellar
-  wallet—no passwords. We enforce a strict KYC process tied to the unique Indonesian
-  National ID (NIK), preventing fake accounts."*
+  selfie upload) → submit. Quick cut to Admin queue → **Approve**. Cut to Stellar
+  Expert on the **ComplianceRegistry** contract.
+- **Action:** Connect (no password); submit KYC; approve as admin; show the `add`
+  invocation on the explorer. **(Cutaway 1 of 3.)**
+- **Narration:** *"Users sign in with their Stellar wallet—no passwords—and complete
+  KYC tied to Indonesia's national ID, the NIK. When an admin approves, the wallet is
+  automatically added to an on-chain compliance registry, so the Soroban contracts
+  themselves know who is legally allowed to invest."*
 - **Behind the scenes:**
-  `POST /auth/challenge` → sign → `POST /auth/register` → `POST /kyc` (idCard + selfie,
-  private bucket). Duplicate NIK → `409 Conflict`.
-
-### Scene 2 — Admin approves KYC → on-chain whitelist (~1:05–1:35)
-- **On screen:** Admin review queue → the investor's submission → **Approve**.
-- **Action:** Approve. Cut to Stellar Expert on the **ComplianceRegistry** contract.
-- **Narration:** *"Once an admin approves, the user's wallet is automatically added to
-  an on-chain compliance registry. Now, the Soroban contracts natively know who is
-  legally allowed to invest."*
-- **Behind the scenes:**
-  `GET /admin/kyc` → `POST /admin/kyc/:userId/approve` → BullMQ orchestrator calls
-  `registry.add(wallet)`.
+  `POST /auth/challenge` → sign → `POST /auth/register` → `POST /kyc` (idCard +
+  selfie, private bucket); `POST /admin/kyc/:userId/approve` → BullMQ orchestrator
+  calls `registry.add(wallet)`.
   **Cutaway:** `stellar.expert/explorer/testnet/contract/CDDYCTY4BP7RMNDT5SQQMOHS6FZ5MKVPB4LIVON6MONBD2L6GWCJZ2YF`
-  → show the `add` invocation.
+  → the `add` invocation.
 
-### Scene 3 — Proposal → approval deploys the contracts (~1:35–2:20)
+### Scene 2 — Proposal → approval auto-deploys the contracts (~0:50–1:15)
 - **On screen:** Entrepreneur creates a proposal — business name, goal (e.g. 10,000
-  USDC), lock period, and a **milestone breakdown that must sum to the goal** → Submit.
-  Switch to Admin → **Approve**. Campaign status walks `PENDING → … → LIVE`.
-- **Action:** Submit proposal; approve as admin; show the campaign go LIVE.
-- **Narration:** *"Next, an entrepreneur submits a funding proposal with specific
-  milestones. Once approved, our backend acts as a deploy trigger: automatically
-  deploying a dedicated Campaign contract and a restricted Share Token on Soroban. No
-  manual setup required."*
+  USDC), lock period, **milestones that sum to the goal** → Submit. Switch to Admin →
+  **Approve**. Campaign status walks `PENDING → … → LIVE` on screen.
+- **Action:** Submit; approve; hold on the status walking to LIVE (with the deployed
+  contract addresses visible in the UI — no explorer cutaway here).
+- **Narration:** *"An entrepreneur submits a proposal with concrete milestones. On
+  approval, the backend automatically deploys a dedicated Campaign contract and a
+  restricted Share Token on Soroban—no manual setup."*
 - **Behind the scenes:**
   `POST /proposals` → `POST /proposals/:id/submit`; `POST /admin/proposals/:id/approve`
   → `campaign-deploy` orchestrator: deploy ShareToken → deploy Campaign →
-  `token.set_minter(campaign)` → LIVE.
-  **Cutaway:** open the freshly deployed Campaign contract on Stellar Expert (deployed
-  from Campaign WASM `462eb8f0…`, ShareToken WASM `ae06cdbb…`).
+  `token.set_minter(campaign)` → LIVE. (Campaign WASM `d867b498…`, ShareToken WASM
+  `ae06cdbb…`.)
 
-### Scene 4 — Investor funds the campaign (~2:20–3:05)
-- **On screen:** Investor browses **live campaigns** → opens one → enters an amount →
-  **Invest**. Wallet prompts to sign. Confirmation shows shares received 1:1.
-- **Action:** Invest USDC; sign; show holdings + the campaign's raised amount tick up.
-  *(Highlight or zoom in on the wallet transaction showing fee is paid by platform).*
-- **Narration:** *"Whitelisted investors fund the campaign directly in USDC. In return,
-  they receive a 1-to-1 restricted Share Token. Notice the UX here: the investor signs
-  the transaction, but the platform pays the network fee using Stellar's fee-bump. The
-  user doesn't need to hold a single drop of XLM."*
+### Scene 3 — Investor funds the campaign · fee-bump (~1:15–1:45)
+- **On screen:** Investor opens the live campaign → enters an amount → **Invest** →
+  wallet prompts to sign → confirmation shows shares received 1:1 and the raised
+  amount ticking up.
+- **Action:** Invest; sign; **zoom on the wallet fee section showing the platform
+  pays it**. Cut to the `invest()` tx on Stellar Expert. **(Cutaway 2 of 3.)**
+- **Narration:** *"Whitelisted investors fund the campaign in USDC and receive
+  restricted share tokens one-to-one. The investor signs, but the platform pays the
+  network fee with Stellar's fee-bump—users never need to hold XLM."*
 - **Behind the scenes:** (relay = prepare → sign → submit)
-  `GET /campaigns` → `POST /campaigns/:id/investments/prepare {amount}` → sign →
+  `POST /campaigns/:id/investments/prepare {amount}` → sign →
   `POST /campaigns/:id/investments {signedXdr}` (fee-bumped) → `invest()` pulls USDC +
   mints shares.
-  **Cutaway:** the `invest()` tx on Stellar Expert — USDC into custody, `mint` event.
+  **Cutaway:** the `invest()` tx — USDC into custody, `mint` event.
 
-### Scene 5 — Milestone voting *(optional, ~3:05–3:30)*
-- **On screen:** Entrepreneur uploads milestone proof; investors see a vote weighted by
-  their share balance → **Approve / Reject**.
-- **Action:** Submit proof; cast a weighted vote; show the tally.
-- **Narration:** *"To protect investors, capital isn't released all at once. It’s
-  unlocked in milestone chunks. Each release requires an on-chain, share-weighted
-  investor vote. This ensures investors retain control of their funds if the business
-  fails to deliver."*
-- **Behind the scenes:** `POST /milestones/:id/submit` (proof), `POST /milestones/:id/vote`.
-  On-chain `release_milestone` is owner-gated + sequential. *(Do not show a live
-  release — WASM redeploy pending. Narrate the gate only.)*
+### Scene 4 — Milestone vote → on-chain release (~1:45–2:10)
+- **On screen:** Entrepreneur uploads milestone proof; investor casts a
+  share-weighted **Approve** vote; the tally settles APPROVED; milestone status flips
+  to **RELEASED** with its tx hash visible in the UI.
+- **Action:** Submit proof; vote; hold on the status flip (tx hash on screen — no
+  explorer cutaway; the refund path is narration only).
+- **Narration:** *"Capital isn't released all at once: each milestone needs a
+  share-weighted investor vote before the contract releases that tranche—
+  sequentially, once, on-chain. And if the business turns bad, an admin can cancel:
+  the contract freezes and investors reclaim their remaining principal."*
+- **Behind the scenes:** `POST /milestones/:id/submit` (proof), `POST /milestones/:id/vote`
+  → vote settles → BullMQ orchestrator calls `release_milestone(index)` (owner-gated,
+  sequential, once-only). Refund path (verified 2026-07-03, narrated only):
+  `POST /admin/campaigns/:id/cancel` → on-chain `cancel()` freezes `invest` +
+  `release_milestone` → `set_refund(root)` → investors `refund_claim()`.
 
-### Scene 6 — Dividends: deposit + Merkle root (*bagi hasil*) (~3:30–4:05)
-- **On screen:** Entrepreneur deposits profit into the campaign; the distribution shows
-  a posted Merkle root / status COMPLETED.
-- **Action:** Deposit profit; wait for the distribution to complete. Cut to a terminal.
-  *(Highlight the root hash in the terminal, then highlight the same hash on Stellar Expert).*
-- **Narration:** *"When the business generates a profit, they deposit USDC back for
-  'bagi hasil', or profit sharing. This is real revenue, not a speculative token. Here’s
-  the technical magic: to save on-chain costs, our backend computes everyone's exact cut,
-  builds a Merkle tree, and posts only the root to the contract."*
+### Scene 5 — Dividends: deposit → Merkle root → claim (*bagi hasil*) (~2:10–2:40)
+- **On screen:** Entrepreneur deposits profit; the distribution shows a posted Merkle
+  root / status COMPLETED. Cut to the Investor: claimable amount → **Claim** → sign →
+  USDC arrives. Cut to the `claim()` tx on Stellar Expert.
+- **Action:** Deposit; show the root posted; claim as investor; show the USDC balance
+  increase and the on-chain `claim()`. **(Cutaway 3 of 3.)**
+- **Narration:** *"Profits come back as 'bagi hasil'—real profit sharing, not a
+  token-price play. The backend computes everyone's exact cut, builds a Merkle tree,
+  and posts only the root on-chain. When an investor claims, the contract verifies
+  the proof and pays the exact USDC share—the platform cannot forge who gets paid."*
 - **Behind the scenes:**
-  `POST /campaigns/:id/distributions/deposit/prepare` → sign →
-  `.../distributions/deposit` → orchestrator snapshots `TokenHolding` → Merkle tree →
-  `set_distribution(id, root)`.
-  **Cutaway (trust proof):** run
-  `cargo test -p campaign print_merkle_test_vector -- --nocapture` in `contracts/` to
-  show the Rust-emitted leaves + root — the same encoding the backend must match
-  byte-for-byte.
+  `POST /campaigns/:id/distributions/deposit/prepare` → sign → `.../deposit` →
+  orchestrator snapshots `TokenHolding` → Merkle tree → `set_distribution(id, root)`.
+  Then `GET /distributions/mine` (proof) → `POST /distributions/:id/claim/prepare` →
+  sign → `.../claim` → on-chain `claim()` verifies proof, pays USDC, marks claimed.
+  **Cutaway:** the `claim()` tx.
 
-### Scene 7 — Investor claims their dividend (~4:05–4:35)
-- **On screen:** Investor sees a claimable amount → **Claim**. Signs. USDC arrives.
-- **Action:** Claim; sign; show USDC balance increase. Cut to the `claim()` tx.
-- **Narration:** *"When claiming, the Soroban contract verifies the Merkle proof against
-  that root and pays out the exact USDC share. The backend does the heavy computation,
-  but cryptographically, it cannot forge who gets paid. Trust is minimized by design."*
-- **Behind the scenes:**
-  `GET /distributions/mine` (proof) → `POST /distributions/:id/claim/prepare` → sign →
-  `.../claim` → on-chain `claim()` verifies proof, pays USDC, marks claimed.
-  **Cutaway:** the `claim()` tx on Stellar Expert.
-
-### Scene 8 — Close (~4:35–5:00)
-- **On screen:** Recap slate — three icons: **KYC'd security token · Milestone-gated
-  release · Merkle dividends**.
-- **Narration:** *"Creon: Bringing transparent, compliant crowdfunding to Indonesia.
-  KYC-enforced security tokens, milestone-gated funding, and mathematically proven
-  dividends. Built on Stellar. Terima kasih."*
-- **Behind the scenes:** —
+### Scene 6 — Close (~2:40–2:55)
+- **On screen:** Recap slate — four icons: **KYC'd security token · Milestone-gated
+  release · Merkle dividends · On-chain refund safety net**.
+- **Narration:** *"And when the lock period ends, the platform unlocks share
+  transfers automatically—no admin, no user action. Creon: transparent, compliant
+  crowdfunding for the backbone of Indonesia's economy, all on Stellar. Terima
+  kasih."*
+- **Behind the scenes:** the `campaign-unlock` orchestrator polls `lockEndAt` and
+  calls the owner-only `unlock()` (verified on testnet 2026-07-04, real tx
+  `14bc8545…`). Narration only — no cutaway.
 
 ---
 
-## 3. Full narration (voiceover, read straight through)
+## 3. Full narration (voiceover, read straight through — ~300 words ≈ 2:10 spoken)
 
-> 63 million Indonesian small businesses—UMKM—struggle to raise capital. Retail investors
-> want to help, but face two massive trust gaps: 'Will the money be used as promised?'
-> and 'Will I actually get my fair share of the profit?'. Creon solves both using
-> Stellar smart contracts.
+> UMKM—Indonesia's micro and small businesses—are the backbone of the economy:
+> 63 million of them, producing over 60% of GDP. Yet most can't access formal
+> financing, and investors who want to help face two trust gaps: 'Will the money be
+> used as promised?' and 'Will I actually get my fair share of the profit?'. Creon
+> solves both with Stellar smart contracts.
 >
-> Let's see it in action. Users sign in instantly with their Stellar wallet—no passwords.
-> We enforce a strict KYC process tied to the unique Indonesian National ID (NIK),
-> preventing fake accounts.
+> Users sign in with their Stellar wallet—no passwords—and complete KYC tied to
+> Indonesia's national ID, the NIK. When an admin approves, the wallet is
+> automatically added to an on-chain compliance registry, so the Soroban contracts
+> themselves know who is legally allowed to invest.
 >
-> Once an admin approves, the user's wallet is automatically added to an on-chain
-> compliance registry. Now, the Soroban contracts natively know who is legally allowed
-> to invest.
+> An entrepreneur submits a proposal with concrete milestones. On approval, the
+> backend automatically deploys a dedicated Campaign contract and a restricted Share
+> Token on Soroban—no manual setup.
 >
-> Next, an entrepreneur submits a funding proposal with specific milestones. Once approved,
-> our backend acts as a deploy trigger: automatically deploying a dedicated Campaign
-> contract and a restricted Share Token on Soroban. No manual setup required.
+> Whitelisted investors fund the campaign in USDC and receive restricted share tokens
+> one-to-one. The investor signs, but the platform pays the network fee with
+> Stellar's fee-bump—users never need to hold XLM.
 >
-> Whitelisted investors fund the campaign directly in USDC. In return, they receive a
-> 1-to-1 restricted Share Token. Notice the UX here: the investor signs the transaction,
-> but the platform pays the network fee using Stellar's fee-bump. The user doesn't need
-> to hold a single drop of XLM.
+> Capital isn't released all at once: each milestone needs a share-weighted investor
+> vote before the contract releases that tranche—sequentially, once, on-chain. And if
+> the business turns bad, an admin can cancel: the contract freezes and investors
+> reclaim their remaining principal.
 >
-> To protect investors, capital isn't released all at once. It’s unlocked in milestone
-> chunks. Each release requires an on-chain, share-weighted investor vote. This ensures
-> investors retain control of their funds if the business fails to deliver.
+> Profits come back as 'bagi hasil'—real profit sharing, not a token-price play. The
+> backend computes everyone's exact cut, builds a Merkle tree, and posts only the
+> root on-chain. When an investor claims, the contract verifies the proof and pays
+> the exact USDC share—the platform cannot forge who gets paid.
 >
-> When the business generates a profit, they deposit USDC back for 'bagi hasil', or
-> profit sharing. This is real revenue, not a speculative token. Here’s the technical
-> magic: to save on-chain costs, our backend computes everyone's exact cut, builds a
-> Merkle tree, and posts only the root to the contract.
->
-> When claiming, the Soroban contract verifies the Merkle proof against that root and
-> pays out the exact USDC share. The backend does the heavy computation, but
-> cryptographically, it cannot forge who gets paid. Trust is minimized by design.
->
-> Creon: Bringing transparent, compliant crowdfunding to Indonesia. KYC-enforced
-> security tokens, milestone-gated funding, and mathematically proven dividends.
-> Built on Stellar. Terima kasih.
+> And when the lock period ends, the platform unlocks share transfers automatically—
+> no admin, no user action. Creon: transparent, compliant crowdfunding for the
+> backbone of Indonesia's economy, all on Stellar. Terima kasih.
 
 ---
 
@@ -236,13 +234,14 @@ effect behind it (for a lower-third caption or B-roll).
 | Platform owner / deployer | `GDXTJXOSJOEHZ6VLIYB35ON2YM3FYH6AYIFJ7YHFNCANALD35HTXZ6MR` |
 | **ComplianceRegistry** (live singleton) | `CDDYCTY4BP7RMNDT5SQQMOHS6FZ5MKVPB4LIVON6MONBD2L6GWCJZ2YF` |
 | **ShareToken** WASM hash | `ae06cdbb78077ef8557d86778ffe5a2a2f5d08829245b61a76ad8f93944571fb` |
-| **Campaign** WASM hash | `462eb8f08bbd4f19b1c67e7b278aadf507b2a661455cb81a368a954e794a51aa` |
+| **Campaign** WASM hash | `d867b498f35a28ace0a8f7d0195b92bd25549eb473703f352a4d74840684bf7b` (re-uploaded 2026-07-03: adds milestone constructor + refund path; old `462eb8f0…` is stale) |
 | **USDC** (test SAC) | `CA6NVKD2EVIK73B4YH6JO4XKA2GLGTN222VTOGXAZVNT5QHKLAT3O7N3` |
 
 Per-campaign ShareToken + Campaign instances are deployed from those WASM hashes at
 approval time — capture *their* addresses during the dry-run.
 
-**Merkle trust-vector command** (run from `contracts/`):
+**Merkle trust-vector command** (*optional cutaway — cut from the 3-minute flow;
+useful for Q&A or a longer edit*; run from `contracts/`):
 ```bash
 cargo test -p campaign print_merkle_test_vector -- --nocapture
 ```
@@ -256,6 +255,9 @@ off-chain tree and the contract can't drift.
 - `Campaign.invest` — whitelist-gated, USDC into custody, shares 1:1.
 - `Campaign.release_milestone` — owner-only, sequential, only after fully funded.
 - `Campaign.claim` — verifies Merkle proof on-chain, pays once per `(id, index)`.
+- `Campaign.cancel` / `set_refund` / `refund_claim` — owner-only cancel **freezes**
+  `invest` + `release_milestone`; refunds are Merkle-proven pro-rata of remaining custody.
+- `ShareToken.unlock` — owner-only, auto-triggered by the backend when the lock elapses.
 
 ---
 
@@ -263,19 +265,23 @@ off-chain tree and the contract can't drift.
 
 - **Add English Subtitles (Closed Captions):** Since you are keeping local terms like UMKM, *urun dana*, and *bagi hasil* for authenticity, clear English subtitles on the video are crucial for international judges.
 - **Zoom** on JSON responses and explorer pages — judges want to see the real ledger.
-- **Highlight the Fee-Bump:** When mentioning the platform pays the fee in Scene 4, explicitly zoom in or add a visual highlight box around the fee section in the wallet UI.
+- **Highlight the Fee-Bump:** When mentioning the platform pays the fee in Scene 3, explicitly zoom in or add a visual highlight box around the fee section in the wallet UI.
 - Keep a **lower-third caption** with the endpoint name for each UI action.
 - Show the Indonesian terms as on-screen text: *urun dana*, *bagi hasil*, UMKM, NIK.
-- Pre-open all explorer tabs to the exact tx/contract pages so there's no loading dead
-  air.
-- For Scene 5, phrase milestone release in future/implemented tense — don't imply a
-  live on-chain release.
+- Pre-open the **three** explorer cutaway tabs (registry `add`, `invest()`, `claim()`)
+  to the exact tx/contract pages so there's no loading dead air.
+- **Make the stats land in Scene 0:** show *63 million UMKM · 61% of GDP · 97% of jobs*
+  as on-screen text — international judges won't know UMKM dominate the economy
+  unless you show it.
+- **The short cut lives or dies on transitions:** pre-stage each persona in its own
+  browser profile/window so switching Entrepreneur → Admin → Investor is one cut,
+  not a login.
 - End on the recap slate held long enough to read.
 
 ## 6. Pre-flight checklist (tick before the take)
 
 - [ ] Backend up, frontend connected, all dry-run hashes saved
-- [ ] Explorer tabs pre-loaded (registry `add`, deploy, `invest`, `claim`)
+- [ ] The 3 explorer cutaway tabs pre-loaded: registry `add`, `invest()`, `claim()`
+- [ ] Milestone RELEASED status (with tx hash) reproducible in the UI for Scene 4
 - [ ] Investor funded with testnet USDC; platform key funded
-- [ ] Merkle test-vector command tested in a terminal
 - [ ] Mic + screen capture levels checked; captions ready
