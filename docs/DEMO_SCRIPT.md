@@ -80,10 +80,11 @@ else is shown as UI status changes so the pace never drags.
 ### Scene 0 — Cold open · the problem (~0:00–0:20)
 - **On screen:** Title card "Creon — *urun dana* for UMKM, on Stellar." Then three
   big stat callouts: **63 million UMKM · 61% of GDP · 97% of jobs** (all three stay
-  on-screen; only the first two are spoken).
+  on-screen and all three are spoken).
 - **Action:** Hold on the title; land the stats; cut to a live campaign card.
 - **Narration:** *"UMKM—Indonesia's micro and small businesses—are the backbone of
-  the economy: 63 million of them, producing over 60% of GDP. Yet most can't access
+  the economy: 63 million of them, producing over 60% of GDP and employing 97% of
+  the workforce. Yet most can't access
   formal financing, and investors who want to help face two trust gaps: 'Will the
   money be used as promised?' and 'Will I actually get my fair share of the profit?'.
   Creon solves both with Stellar smart contracts."*
@@ -158,7 +159,7 @@ else is shown as UI status changes so the pace never drags.
   USDC arrives. Cut to the `claim()` tx on Stellar Expert.
 - **Action:** Deposit; show the root posted; claim as investor; show the USDC balance
   increase and the on-chain `claim()`. **(Cutaway 3 of 3.)**
-- **Narration:** *"Profits come back as 'bagi hasil'—real profit sharing, not a
+- **Narration:** *"Profits come back as real profit sharing—'bagi hasil'—not a
   token-price play. The backend computes everyone's exact cut, builds a Merkle tree,
   and posts only the root on-chain. When an investor claims, the contract verifies
   the proof and pays the exact USDC share—the platform cannot forge who gets paid."*
@@ -185,7 +186,8 @@ else is shown as UI status changes so the pace never drags.
 ## 3. Full narration (voiceover, read straight through — ~300 words ≈ 2:10 spoken)
 
 > UMKM—Indonesia's micro and small businesses—are the backbone of the economy:
-> 63 million of them, producing over 60% of GDP. Yet most can't access formal
+> 63 million of them, producing over 60% of GDP and employing 97% of the
+> workforce. Yet most can't access formal
 > financing, and investors who want to help face two trust gaps: 'Will the money be
 > used as promised?' and 'Will I actually get my fair share of the profit?'. Creon
 > solves both with Stellar smart contracts.
@@ -208,7 +210,7 @@ else is shown as UI status changes so the pace never drags.
 > the business turns bad, an admin can cancel: the contract freezes and investors
 > reclaim their remaining principal.
 >
-> Profits come back as 'bagi hasil'—real profit sharing, not a token-price play. The
+> Profits come back as real profit sharing—'bagi hasil'—not a token-price play. The
 > backend computes everyone's exact cut, builds a Merkle tree, and posts only the
 > root on-chain. When an investor claims, the contract verifies the proof and pays
 > the exact USDC share—the platform cannot forge who gets paid.
@@ -271,8 +273,8 @@ off-chain tree and the contract can't drift.
 - Pre-open the **three** explorer cutaway tabs (registry `add`, `invest()`, `claim()`)
   to the exact tx/contract pages so there's no loading dead air.
 - **Make the stats land in Scene 0:** show *63 million UMKM · 61% of GDP · 97% of jobs*
-  as on-screen text — international judges won't know UMKM dominate the economy
-  unless you show it.
+  as on-screen text in sync with the narration — hearing *and* seeing the numbers is
+  what makes UMKM's dominance stick for international judges.
 - **The short cut lives or dies on transitions:** pre-stage each persona in its own
   browser profile/window so switching Entrepreneur → Admin → Investor is one cut,
   not a login.
