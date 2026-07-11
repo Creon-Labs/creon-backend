@@ -6,7 +6,7 @@ This document outlines what the frontend needs to implement to integrate seamles
 
 **Wallet Authentication (No Passwords).** Identity is tied to a Stellar keypair. You will need a Wallet integration (such as Freighter, xBull, or any compatible signer) capable of:
 1. Returning the public key (`G...`, 56 characters).
-2. Signing a raw UTF-8 message → returning a base64 signature (used for authentication).
+2. Signing a UTF-8 message using SEP-53 → returning a base64 signature (used for authentication).
 3. Signing a base64 XDR transaction envelope → returning a signed base64 XDR (used for on-chain actions).
 
 **JWT.** Register/login set the JWT as an **httpOnly cookie** (`creon_access_token`) — it is never returned in the response body and cannot be read from JS. The token is minted during registration/login, contains `{ sub: userId, roles: Role[] }`, and expires in **7 days** (`JWT_EXPIRES_IN`); the cookie's `Max-Age` matches. Every authenticated request must be sent with credentials so the browser attaches the cookie automatically — `fetch(url, { credentials: 'include' })` or an axios instance with `withCredentials: true`. There is no refresh endpoint — once it expires, prompt the user to log in again. `POST /auth/logout` clears the cookie (safe to call even if already expired/absent).
@@ -32,7 +32,7 @@ Both registration and login use the exact same challenge-response flow; only the
 
 **Steps:**
 1. Request a challenge payload for the user's Wallet address.
-2. The Wallet signs the returned `message` **as raw bytes** (this is a message signature, *not* a transaction) → `signatureB64`.
+2. The Wallet signs the returned `message` using **SEP-53** (this is a message signature, *not* a transaction) → `signatureB64`.
 3. Call **register** (for new users) or **login** (for returning users) using the signature — the JWT is set as an httpOnly cookie, and the body returns the authenticated principal (`{ userId, roles }`).
 4. Make sure the request that called register/login (and every request after it) is sent with credentials (`credentials: 'include'` / `withCredentials: true`) so the cookie is stored and re-sent automatically. No client-side token storage needed or possible.
 
@@ -47,6 +47,7 @@ Both registration and login use the exact same challenge-response flow; only the
 
 **Caveats:**
 - **The challenge is single-use and expires in 5 minutes** (`AUTH_CHALLENGE_TTL_SECONDS`). Prompt the user to sign promptly. If register/login fails with a `401`, request a fresh challenge.
+- **Authentication signatures must use SEP-53**: sign `SHA-256("Stellar Signed Message:\n" + UTF-8(message))`, not the raw message bytes.
 - **`role` must be either `ENTREPRENEUR` or `INVESTOR`** (derive this from the onboarding path the user selected). The `email` field is **required if the role is ENTREPRENEUR**, but optional otherwise.
 - **One registration per Wallet.** There is no "add role" endpoint. In the UI, treat each Wallet as a single unified account.
 - **`login` is not role-restricted.** Any registered Wallet (including a seeded admin) can log in via this endpoint.

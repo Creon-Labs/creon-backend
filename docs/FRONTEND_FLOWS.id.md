@@ -6,7 +6,7 @@ Dokumen ini menjelaskan apa saja yang perlu diimplementasikan oleh frontend agar
 
 **Autentikasi menggunakan Wallet, bukan password.** Identitas = sebuah *keypair* Stellar. Anda butuh integrasi *Wallet* (seperti Freighter, xBull, atau *signer* lainnya) yang bisa:
 1. Mengembalikan *public key* (`G...`, 56 karakter).
-2. Menandatangani pesan *raw* UTF-8 → *signature* base64 (untuk autentikasi).
+2. Menandatangani pesan UTF-8 menggunakan SEP-53 → *signature* base64 (untuk autentikasi).
 3. Menandatangani *tx envelope* XDR base64 → *signed* XDR base64 (untuk aksi *on-chain*).
 
 **JWT.** *Register/login* mengeset JWT sebagai **cookie httpOnly** (`creon_access_token`) — token ini tidak pernah dikembalikan di *response body* dan tidak bisa dibaca dari JS. Token di-*mint* saat *register/login*, berisi `{ sub: userId, roles: Role[] }`, dan akan *expired* dalam **7 hari** (`JWT_EXPIRES_IN`); `Max-Age` cookie mengikuti masa berlaku ini. Setiap *request* yang butuh autentikasi harus dikirim dengan *credentials* agar browser menyertakan cookie secara otomatis — `fetch(url, { credentials: 'include' })` atau instance axios dengan `withCredentials: true`. Tidak ada *endpoint* *refresh* — kalau *expired*, jalankan ulang proses *login*. `POST /auth/logout` menghapus cookie tersebut (aman dipanggil meskipun cookie sudah *expired*/tidak ada).
@@ -32,7 +32,7 @@ Keduanya menggunakan alur *challenge-response* yang sama; hanya *endpoint* akhir
 
 **Langkah-langkah:**
 1. *Request* sebuah *challenge* menggunakan alamat *Wallet*.
-2. *Wallet* menandatangani `message` yang dikembalikan **sebagai raw bytes** (ini adalah *message signature*, **bukan** transaksi) → `signatureB64`.
+2. *Wallet* menandatangani `message` yang dikembalikan menggunakan **SEP-53** (ini adalah *message signature*, **bukan** transaksi) → `signatureB64`.
 3. Panggil *endpoint* **register** (*user* baru) atau **login** (*user* lama) dengan *signature* tersebut — JWT diset sebagai cookie httpOnly, dan *body* mengembalikan prinsipal yang terautentikasi (`{ userId, roles }`).
 4. Pastikan *request* yang memanggil register/login (dan setiap *request* setelahnya) dikirim dengan *credentials* (`credentials: 'include'` / `withCredentials: true`) agar cookie tersimpan dan ikut terkirim otomatis. Tidak perlu (dan tidak bisa) menyimpan token di sisi *client*.
 
@@ -47,6 +47,7 @@ Keduanya menggunakan alur *challenge-response* yang sama; hanya *endpoint* akhir
 
 **Catatan Penting:**
 - **Challenge hanya berlaku satu kali dan expired dalam 5 menit** (`AUTH_CHALLENGE_TTL_SECONDS`) — segera lakukan *sign*; *request* ulang *challenge* baru jika *register/login* gagal dengan status `401`.
+- **Signature autentikasi wajib menggunakan SEP-53**: sign `SHA-256("Stellar Signed Message:\n" + UTF-8(message))`, bukan raw bytes dari message.
 - **`role` hanya boleh diisi `ENTREPRENEUR` atau `INVESTOR`** (pilih berdasarkan alur *onboarding* yang dipilih *user*). `email` **wajib diisi jika role adalah ENTREPRENEUR**, selain itu opsional.
 - **Satu registrasi per Wallet** — tidak ada *endpoint* "tambah role"; anggap setiap *Wallet* hanya memiliki satu *role* di UI.
 - **`login` tidak dibatasi oleh role** — *Wallet* mana pun yang sudah terdaftar (termasuk *seeded* admin) bisa melakukan *login*.

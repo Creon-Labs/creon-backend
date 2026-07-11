@@ -8,17 +8,19 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Keypair, StrKey } from '@stellar/stellar-base';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { CacheService } from '../cache/cache.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Role } from '../../generated/prisma/enums';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
+const SEP53_PREFIX = Buffer.from('Stellar Signed Message:\n', 'utf8');
+
 /**
  * Wallet-based authentication. Ownership of a Stellar address is proven by a
  * challenge–response: the server issues a single-use nonce (stored in Valkey),
- * the client signs it with their secret key, and the server verifies the
+ * the client signs it using SEP-53, and the server verifies the
  * signature against the public key. A successful verify mints a JWT.
  */
 @Injectable()
@@ -90,8 +92,8 @@ export class AuthService {
   }
 
   /**
-   * Verify a base64 signature against the wallet's stored challenge. On success
-   * the challenge is deleted so it cannot be replayed (single-use).
+   * Verify a base64 SEP-53 signature against the wallet's stored challenge. On
+   * success the challenge is deleted so it cannot be replayed (single-use).
    */
   private async verifySignature(
     walletAddress: string,
@@ -107,7 +109,7 @@ export class AuthService {
     let valid = false;
     try {
       valid = Keypair.fromPublicKey(walletAddress).verify(
-        Buffer.from(message),
+        this.hashSep53Message(message),
         Buffer.from(signatureB64, 'base64'),
       );
     } catch {
@@ -118,6 +120,12 @@ export class AuthService {
     }
 
     await this.cache.del(key);
+  }
+
+  private hashSep53Message(message: string): Buffer {
+    return createHash('sha256')
+      .update(Buffer.concat([SEP53_PREFIX, Buffer.from(message, 'utf8')]))
+      .digest();
   }
 
   private signToken(user: { id: string; roles: Role[] }): {

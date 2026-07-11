@@ -7,9 +7,18 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Keypair } from '@stellar/stellar-base';
+import { createHash } from 'crypto';
 import { CacheService } from '../cache/cache.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
+
+const SEP53_PREFIX = Buffer.from('Stellar Signed Message:\n', 'utf8');
+
+function hashSep53Message(message: string): Buffer {
+  return createHash('sha256')
+    .update(Buffer.concat([SEP53_PREFIX, Buffer.from(message, 'utf8')]))
+    .digest();
+}
 
 /** In-memory CacheService stub backed by a Map (TTL ignored). */
 function makeCache() {
@@ -47,13 +56,13 @@ const jwt = {
   sign: jest.fn(() => 'signed.jwt.token'),
 } as unknown as JwtService;
 
-/** Sign the message currently stored for `wallet` and return base64 signature. */
+/** Sign the stored message using SEP-53 and return a base64 signature. */
 function signStoredMessage(
   cache: CacheService & { store: Map<string, string> },
   keypair: Keypair,
 ): string {
   const message = cache.store.get(`auth:challenge:${keypair.publicKey()}`)!;
-  return keypair.sign(Buffer.from(message)).toString('base64');
+  return keypair.sign(hashSep53Message(message)).toString('base64');
 }
 
 describe('AuthService', () => {
@@ -67,6 +76,21 @@ describe('AuthService', () => {
     cache = makeCache();
     prisma = makePrisma();
     service = new AuthService(cache, prisma, jwt, config);
+  });
+
+  it('matches the official SEP-53 ASCII test vector', () => {
+    const signer = Keypair.fromSecret(
+      'SAKICEVQLYWGSOJS4WW7HZJWAHZVEEBS527LHK5V4MLJALYKICQCJXMW',
+    );
+    const signature =
+      'fO5dbYhXUhBMhe6kId/cuVq/AfEnHRHEvsP8vXh03M1uLpi5e46yO2Q8rEBzu3feXQewcQE5GArp88u6ePK6BA==';
+    const hash = hashSep53Message('Hello, World!');
+
+    expect(signer.publicKey()).toBe(
+      'GBXFXNDLV4LSWA4VB7YIL5GBD7BVNR22SGBTDKMO2SBZZHDXSKZYCP7L',
+    );
+    expect(signer.sign(hash).toString('base64')).toBe(signature);
+    expect(signer.verify(hash, Buffer.from(signature, 'base64'))).toBe(true);
   });
 
   it('rejects an invalid wallet address on challenge', async () => {
@@ -133,6 +157,19 @@ describe('AuthService', () => {
       service.login({
         walletAddress: keypair.publicKey(),
         signature: otherSig,
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('rejects a raw message-byte signature', async () => {
+    await service.createChallenge(keypair.publicKey());
+    const message = cache.store.get(`auth:challenge:${keypair.publicKey()}`)!;
+    const rawSignature = keypair.sign(Buffer.from(message)).toString('base64');
+
+    await expect(
+      service.login({
+        walletAddress: keypair.publicKey(),
+        signature: rawSignature,
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });

@@ -28,7 +28,7 @@ info:
 
     ### Wallet challenge-response flow
     1. `POST /auth/challenge` → receive a nonce message
-    2. Sign the message with your Stellar secret key (Ed25519)
+    2. Sign the message with your Stellar secret key using SEP-53
     3. `POST /auth/register` (first time) or `POST /auth/login` with the
        signature — the JWT cookie is set on success and the body returns the
        authenticated principal (`userId`, `roles`)
@@ -272,7 +272,7 @@ components:
           example: GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3MV72CSOFA
         signature:
           type: string
-          description: Base64-encoded Ed25519 signature over the challenge message
+          description: Base64-encoded SEP-53 Ed25519 signature over the challenge message
         role:
           type: string
           enum: [ ENTREPRENEUR, INVESTOR ]
@@ -298,7 +298,7 @@ components:
           example: GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3MV72CSOFA
         signature:
           type: string
-          description: Base64-encoded Ed25519 signature over the challenge message
+          description: Base64-encoded SEP-53 Ed25519 signature over the challenge message
 
     RejectRequest:
       type: object
@@ -1658,6 +1658,7 @@ paths:
 
         **Untuk Frontend:**
         - Pastikan sudah memanggil `/auth/challenge` sebelumnya.
+        - Tanda tangani message menggunakan SEP-53, bukan raw bytes message.
         - Kirim role (`ENTREPRENEUR` atau `INVESTOR`).
         - Jika role `ENTREPRENEUR`, wajib mengirimkan `email`.
         - Jika berhasil, token JWT diset sebagai httpOnly cookie
@@ -1706,7 +1707,7 @@ paths:
 
         **Untuk Frontend:**
         - Pastikan sudah memanggil `/auth/challenge` sebelumnya.
-        - Kirim hasil tanda tangan ke endpoint ini.
+        - Kirim hasil tanda tangan SEP-53 ke endpoint ini.
         - Jika berhasil, token JWT diset sebagai httpOnly cookie
           (`creon_access_token`) — body hanya berisi `userId` dan `roles`.
           Gunakan `credentials: 'include'` (fetch) / `withCredentials: true`

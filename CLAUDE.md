@@ -123,9 +123,10 @@ ledger-sequence fields serialize to JSON.
 
 **Auth** (`src/auth/`) — wallet-based, JWT-stateless:
 - Flow: `POST /auth/challenge` issues a single-use nonce (stored in Valkey under
-  `auth:challenge:<wallet>`, TTL `AUTH_CHALLENGE_TTL_SECONDS`); client signs it;
-  `POST /auth/register` or `/auth/login` verifies the Stellar signature and mints a
-  JWT with payload `{ sub: userId, roles }`. Verifying deletes the challenge (no replay).
+  `auth:challenge:<wallet>`, TTL `AUTH_CHALLENGE_TTL_SECONDS`); client signs it
+  using SEP-53; `POST /auth/register` or `/auth/login` verifies the Stellar
+  signature and mints a JWT with payload `{ sub: userId, roles }`. Verifying
+  deletes the challenge (no replay).
 - Guards (manual, **no passport**): `JwtAuthGuard` (verifies bearer token, attaches
   `request.user`), `RolesGuard` (reads `@Roles(...)` via `Reflector`),
   `ApprovedEntrepreneurGuard` (role ENTREPRENEUR **and** `KycProfile.status

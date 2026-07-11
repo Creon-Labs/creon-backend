@@ -13,6 +13,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { config as loadEnv } from 'dotenv';
 import {
   Account,
@@ -32,6 +33,7 @@ const NETWORK_PASSPHRASE = process.env.STELLAR_NETWORK_PASSPHRASE!;
 const RPC_URL = process.env.STELLAR_RPC_URL!;
 /** Name of the httpOnly cookie AuthController sets the JWT under (auth-cookie.constants.ts). */
 const AUTH_COOKIE_NAME = 'creon_access_token';
+const SEP53_PREFIX = Buffer.from('Stellar Signed Message:\n', 'utf8');
 
 interface Wallet {
   role: 'admin' | 'entrepreneur' | 'investor1' | 'investor2';
@@ -83,7 +85,10 @@ async function apiRequest(
 }
 
 function signChallenge(kp: Keypair, message: string): string {
-  return kp.sign(Buffer.from(message)).toString('base64');
+  const digest = createHash('sha256')
+    .update(Buffer.concat([SEP53_PREFIX, Buffer.from(message, 'utf8')]))
+    .digest();
+  return kp.sign(digest).toString('base64');
 }
 function signXdr(kp: Keypair, xdr: string): string {
   const tx = TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASE);
