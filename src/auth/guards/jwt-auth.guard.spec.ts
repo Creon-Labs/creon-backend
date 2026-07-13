@@ -47,10 +47,7 @@ describe('JwtAuthGuard', () => {
       }),
     } as unknown as JwtService;
     const guard = new JwtAuthGuard(jwt);
-    const { context } = makeContext(
-      {},
-      { [AUTH_COOKIE_NAME]: 'bad.token' },
-    );
+    const { context } = makeContext({}, { [AUTH_COOKIE_NAME]: 'bad.token' });
     expect(() => guard.canActivate(context)).toThrow(UnauthorizedException);
   });
 

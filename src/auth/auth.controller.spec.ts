@@ -95,14 +95,18 @@ describe('AuthController', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
+    const getMe = jest.fn().mockResolvedValue(mockProfile);
     const auth = {
-      getMe: jest.fn().mockResolvedValue(mockProfile),
+      getMe,
     } as unknown as AuthService;
     const controller = new AuthController(auth, {} as JwtService, config);
 
-    const result = await controller.getMe({ userId: 'u1', roles: ['INVESTOR'] });
+    const result = await controller.getMe({
+      userId: 'u1',
+      roles: ['INVESTOR'],
+    });
 
     expect(result).toEqual(mockProfile);
-    expect(auth.getMe).toHaveBeenCalledWith('u1');
+    expect(getMe).toHaveBeenCalledWith('u1');
   });
 });
