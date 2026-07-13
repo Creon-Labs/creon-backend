@@ -20,11 +20,11 @@ info:
     ## Authentication
     `POST /auth/login` or `POST /auth/register` set the JWT as an **httpOnly
     cookie** (`creon_access_token`) — it is not returned in the response body.
-    Browser clients must send credentialed requests (`credentials: 'include'`
-    for `fetch`, `withCredentials: true` for axios) so the cookie is attached
-    automatically; a `Authorization: Bearer <token>` header also still works
-    for non-browser clients that read the token from the `Set-Cookie` response
-    header. `POST /auth/logout` clears the cookie.
+    Clients must send credentialed requests (`credentials: 'include'` for
+    `fetch`, `withCredentials: true` for axios) so the cookie is attached
+    automatically. Non-browser clients that cannot store cookies should
+    re-send the cookie value via a `Cookie: creon_access_token=<jwt>` header.
+    Bearer tokens are not accepted. `POST /auth/logout` clears the cookie.
 
     ### Wallet challenge-response flow
     1. `POST /auth/challenge` → receive a nonce message
@@ -127,10 +127,6 @@ tags:
 
 components:
   securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
     CookieAuth:
       type: apiKey
       in: cookie
@@ -1773,7 +1769,7 @@ paths:
         - Jika profil sebelumnya ditolak (`REJECTED`), memanggil endpoint ini akan menimpa (update) data sebelumnya dan mengubah status kembali ke `PENDING`.
       operationId: kycSubmit
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -1846,7 +1842,7 @@ paths:
         - Jika `REJECTED`, alasan penolakan (`reason`) akan tersedia di response, tampilkan pesan ini kepada user agar mereka bisa memperbaiki datanya.
       operationId: kycGetMine
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: KYC profile
@@ -1882,7 +1878,7 @@ paths:
         - URL ini hanya berlaku selama 5 menit.
       operationId: adminKycList
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: status
           in: query
@@ -1927,7 +1923,7 @@ paths:
         - Di background, sistem akan mendaftarkan wallet user ke blockchain agar bisa berinvestasi.
       operationId: adminKycApprove
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: userId
           in: path
@@ -1973,7 +1969,7 @@ paths:
         - Ubah status KYC menjadi `REJECTED`.
       operationId: adminKycReject
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: userId
           in: path
@@ -2030,7 +2026,7 @@ paths:
         - Gunakan ini jika ada pelanggaran sehingga user tidak bisa lagi bertransaksi atau menerima saham di platform.
       operationId: adminKycRevoke
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: userId
           in: path
@@ -2087,7 +2083,7 @@ paths:
         - Tampilkan list proposal yang menunggu persetujuan admin.
       operationId: adminProposalList
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: status
           in: query
@@ -2132,7 +2128,7 @@ paths:
         - Endpoint mengembalikan `campaignId`, UI admin bisa melakukan polling menggunakan ID ini untuk melihat status akhir dari kampanye.
       operationId: adminProposalApprove
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: id
           in: path
@@ -2177,7 +2173,7 @@ paths:
         - Tampilkan form untuk memasukkan alasan penolakan sebelum memanggil endpoint ini.
       operationId: adminProposalReject
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: id
           in: path
@@ -2235,7 +2231,7 @@ paths:
         - Hanya bisa dipanggil jika kampanye berstatus `LIVE`.
       operationId: adminCampaignCancel
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: id
           in: path
@@ -2293,7 +2289,7 @@ paths:
         - User harus memiliki role `ENTREPRENEUR` dan KYC sudah `APPROVED`.
       operationId: proposalCreate
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -2332,7 +2328,7 @@ paths:
         - Tampilkan riwayat proposal beserta statusnya (`DRAFT`, `SUBMITTED`, `APPROVED`, dll).
       operationId: proposalList
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: The caller's proposals
@@ -2363,7 +2359,7 @@ paths:
         - Gunakan untuk mengisi form edit jika proposal masih berstatus `DRAFT`.
       operationId: proposalGet
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: id
           in: path
@@ -2401,7 +2397,7 @@ paths:
         - Akan gagal jika proposal sudah di-submit (bukan `DRAFT`).
       operationId: proposalUpdate
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: id
           in: path
@@ -2458,7 +2454,7 @@ paths:
         - Gunakan di tombol "Submit Proposal". Setelah ini, proposal tidak bisa di-edit lagi oleh user.
       operationId: proposalSubmit
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: id
           in: path
@@ -2605,7 +2601,7 @@ paths:
         - Belum ada data yang disimpan di database platform pada tahap ini.
       operationId: investmentPrepare
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: campaignId
           in: path
@@ -2664,7 +2660,7 @@ paths:
         - Idempotent: jika transaksi yang sama dikirim dua kali, tidak akan dobel investasi.
       operationId: investmentSubmit
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: campaignId
           in: path
@@ -2723,7 +2719,7 @@ paths:
         - Gunakan untuk halaman "Riwayat Transaksi" atau "Portofolio".
       operationId: investmentListMine
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: The caller's investments
@@ -2755,7 +2751,7 @@ paths:
         - Berbeda dengan riwayat investasi, endpoint ini menampilkan saldo akhir saham saat ini.
       operationId: holdingListMine
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: The caller's current holdings
@@ -2787,7 +2783,7 @@ paths:
         - Terima XDR lalu minta wallet Entrepreneur menandatanganinya.
       operationId: distributionDepositPrepare
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: campaignId
           in: path
@@ -2845,7 +2841,7 @@ paths:
         - Backend akan memproses ke blockchain dan secara asinkron (background) akan menghitung jatah dividen (Merkle Tree) untuk masing-masing investor.
       operationId: distributionDepositSubmit
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: campaignId
           in: path
@@ -2904,7 +2900,7 @@ paths:
         - Tampilkan di halaman detail kampanye tab "Riwayat Dividen".
       operationId: distributionListForCampaign
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: campaignId
           in: path
@@ -2943,7 +2939,7 @@ paths:
         - Gunakan untuk halaman "Klaim Keuntungan". Sudah termasuk data _Merkle proof_ yang dibutuhkan untuk melakukan klaim.
       operationId: distributionListMine
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: The caller's entitlements
@@ -2976,7 +2972,7 @@ paths:
         - Akan gagal (404/409) jika user tidak punya hak klaim atau sudah diklaim sebelumnya.
       operationId: distributionClaimPrepare
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: distributionId
           in: path
@@ -3021,7 +3017,7 @@ paths:
         - Setelah sukses, dana dividen akan masuk ke wallet investor dan status klaim di database akan berubah menjadi `CLAIMED`.
       operationId: distributionClaimSubmit
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: distributionId
           in: path
@@ -3081,7 +3077,7 @@ paths:
         - Berguna untuk merender UI Voting (Persetujuan Pencairan).
       operationId: milestoneList
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: campaignId
           in: query
@@ -3119,7 +3115,7 @@ paths:
         - Termasuk data apakah investor yang sedang login sudah melakukan vote atau belum.
       operationId: milestoneGet
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: milestoneId
           in: path
@@ -3157,7 +3153,7 @@ paths:
         - Jika berhasil, akan membuka periode masa voting bagi investor (default 7 hari).
       operationId: milestoneSubmit
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: milestoneId
           in: path
@@ -3228,7 +3224,7 @@ paths:
         - Investor bisa mengubah suara (vote ulang) selama masa voting belum ditutup.
       operationId: milestoneVote
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: milestoneId
           in: path
@@ -3285,7 +3281,7 @@ paths:
         - Mengembalikan `null` jika kampanye belum/tidak dibatalkan.
       operationId: campaignRefundGet
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: campaignId
           in: path
@@ -3324,7 +3320,7 @@ paths:
         - Tampilkan di halaman "Klaim Refund".
       operationId: refundListMine
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       responses:
         '200':
           description: The caller's refund entitlements
@@ -3355,7 +3351,7 @@ paths:
         - Sama mekanismenya dengan klaim dividen. Panggil ini lalu minta wallet menandatangani XDR.
       operationId: refundClaimPrepare
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: refundId
           in: path
@@ -3400,7 +3396,7 @@ paths:
         - Setelah sukses, dana refund akan kembali ke wallet investor.
       operationId: refundClaimSubmit
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: refundId
           in: path

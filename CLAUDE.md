@@ -127,8 +127,9 @@ ledger-sequence fields serialize to JSON.
   using SEP-53; `POST /auth/register` or `/auth/login` verifies the Stellar
   signature and mints a JWT with payload `{ sub: userId, roles }`. Verifying
   deletes the challenge (no replay).
-- Guards (manual, **no passport**): `JwtAuthGuard` (verifies bearer token, attaches
-  `request.user`), `RolesGuard` (reads `@Roles(...)` via `Reflector`),
+- Guards (manual, **no passport**): `JwtAuthGuard` (verifies JWT from the
+  `creon_access_token` cookie, attaches `request.user`), `RolesGuard` (reads
+  `@Roles(...)` via `Reflector`),
   `ApprovedEntrepreneurGuard` (role ENTREPRENEUR **and** `KycProfile.status
   === APPROVED`; now wired on the `/proposals` write routes — create/update/submit).
 - Decorators: `@Roles(...)`, `@CurrentUser()`. `AuthModule` re-exports `JwtModule`

@@ -60,7 +60,7 @@ async function apiRequest(
   opts: { token?: string; body?: unknown; form?: FormData } = {},
 ): Promise<any> {
   const headers: Record<string, string> = {};
-  if (opts.token) headers['Authorization'] = `Bearer ${opts.token}`;
+  if (opts.token) headers['Cookie'] = `${AUTH_COOKIE_NAME}=${opts.token}`;
   let body: BodyInit | undefined;
   if (opts.form) {
     body = opts.form;
@@ -124,8 +124,8 @@ async function challengeMessage(publicKey: string): Promise<string> {
 }
 
 /** The JWT is delivered only as an httpOnly Set-Cookie now, not in the response body
- *  (AuthController.setAuthCookie) — extract it directly and reuse it as a Bearer
- *  token, since JwtAuthGuard accepts either. */
+ *  (AuthController.setAuthCookie) — extract it and re-send as a Cookie header on
+ *  later requests (JwtAuthGuard is cookie-only). */
 async function loginWallet(w: Wallet): Promise<string> {
   const kp = Keypair.fromSecret(w.secretKey);
   const message = await challengeMessage(w.publicKey);
