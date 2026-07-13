@@ -206,4 +206,46 @@ describe('AuthService', () => {
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  describe('getMe', () => {
+    const mockUser = {
+      id: 'u1',
+      walletAddress: 'GABC',
+      email: 'user@example.com',
+      displayName: 'John',
+      roles: ['INVESTOR'],
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    it('returns the user profile when found', async () => {
+      prisma.user.findUnique.mockResolvedValue(mockUser);
+
+      const result = await service.getMe('u1');
+
+      expect(result).toEqual(mockUser);
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        select: {
+          id: true,
+          walletAddress: true,
+          email: true,
+          displayName: true,
+          roles: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+    });
+
+    it('throws NotFoundException when user does not exist', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.getMe('nonexistent')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+  });
 });

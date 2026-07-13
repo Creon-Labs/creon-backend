@@ -551,6 +551,42 @@ components:
           items:
             $ref: '#/components/schemas/Role'
 
+    UserProfileResponse:
+      type: object
+      required: [ id, walletAddress, roles, isActive, createdAt, updatedAt ]
+      description: |
+        Full user profile returned by `GET /auth/me`. Unlike `AuthPrincipalResponse`
+        (which only contains `userId` and `roles`), this includes all profile fields.
+      properties:
+        id:
+          type: string
+          format: uuid
+        walletAddress:
+          type: string
+          minLength: 56
+          maxLength: 56
+          example: GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3MV72CSOFA
+        email:
+          type: [ string, 'null' ]
+          format: email
+          example: founder@umkm.id
+        displayName:
+          type: [ string, 'null' ]
+          example: Budi Santoso
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+        isActive:
+          type: boolean
+          example: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
     KycSubmitResponse:
       type: object
       required: [ status, submittedAt ]
@@ -1740,6 +1776,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/me:
+    get:
+      tags: [ auth ]
+      summary: Profil User Saat Ini
+      description: |
+        Mengembalikan data profil lengkap dari user yang sedang login
+        berdasarkan JWT di httpOnly cookie.
+
+        **Untuk Frontend:**
+        - Panggil endpoint ini setelah login/register untuk mendapatkan
+          data profil lengkap (wallet address, email, display name, roles, dll).
+        - Gunakan `credentials: 'include'` (fetch) / `withCredentials: true`
+          (axios) agar cookie JWT ikut terkirim.
+        - Jika cookie tidak ada atau JWT sudah kedaluwarsa, response akan 401.
+      operationId: authMe
+      security:
+        - CookieAuth: []
+      responses:
+        '200':
+          description: User profile retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UserProfileResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /auth/logout:
     post:

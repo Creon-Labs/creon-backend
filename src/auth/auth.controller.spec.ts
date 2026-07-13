@@ -83,4 +83,26 @@ describe('AuthController', () => {
       expect.objectContaining({ httpOnly: true, sameSite: 'lax' }) as unknown,
     );
   });
+
+  it('getMe delegates to AuthService and returns user profile', async () => {
+    const mockProfile = {
+      id: 'u1',
+      walletAddress: 'GABC',
+      email: 'user@example.com',
+      displayName: 'John',
+      roles: ['INVESTOR'],
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const auth = {
+      getMe: jest.fn().mockResolvedValue(mockProfile),
+    } as unknown as AuthService;
+    const controller = new AuthController(auth, {} as JwtService, config);
+
+    const result = await controller.getMe({ userId: 'u1', roles: ['INVESTOR'] });
+
+    expect(result).toEqual(mockProfile);
+    expect(auth.getMe).toHaveBeenCalledWith('u1');
+  });
 });

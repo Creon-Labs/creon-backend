@@ -1,15 +1,19 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Post,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import type { Response } from 'express';
 import { ResponseMessage } from '../common/decorators/response-message.decorator';
+import { CurrentUser } from './decorators/current-user.decorator';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AuthService } from './auth.service';
 import {
   AUTH_COOKIE_NAME,
@@ -70,6 +74,15 @@ export class AuthController {
   ): Promise<AuthUser> {
     const { accessToken } = await this.auth.login(dto);
     return this.setAuthCookie(res, accessToken);
+  }
+
+  /** Return the full profile of the currently authenticated user. */
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('User profile retrieved')
+  getMe(@CurrentUser() user: AuthUser) {
+    return this.auth.getMe(user.userId);
   }
 
   /**
