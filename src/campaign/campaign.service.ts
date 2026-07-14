@@ -41,11 +41,14 @@ const PUBLIC_CAMPAIGN_SELECT = {
     select: {
       businessName: true,
       businessDescription: true,
+      // Query media through proposal relation to handle cases where
+      // ProposalMedia.campaignId is NULL. The proposal is the source of truth
+      // since media is uploaded during proposal creation.
+      media: {
+        select: MEDIA_SELECT,
+        orderBy: { sortOrder: 'asc' as const },
+      },
     },
-  },
-  media: {
-    select: MEDIA_SELECT,
-    orderBy: { sortOrder: 'asc' as const },
   },
 } satisfies Prisma.CampaignSelect;
 
@@ -134,11 +137,12 @@ export class CampaignService {
   }
 
   private async toPublicResponse(campaign: CampaignWithMedia) {
-    const { media, proposal, ...rest } = campaign;
+    const { proposal, ...rest } = campaign;
+    const { media, ...proposalFields } = proposal;
     return {
       ...rest,
-      businessName: proposal.businessName,
-      businessDescription: proposal.businessDescription,
+      businessName: proposalFields.businessName,
+      businessDescription: proposalFields.businessDescription,
       media: await mapMediaToResponse(this.storage, media),
     };
   }
