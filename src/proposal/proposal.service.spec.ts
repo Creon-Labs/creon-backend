@@ -367,9 +367,7 @@ describe('ProposalService media', () => {
     ]);
 
     await expect(
-      service.addMedia('u1', 'p1', [
-        fakeFile({ mimetype: 'image/png' }),
-      ]),
+      service.addMedia('u1', 'p1', [fakeFile({ mimetype: 'image/png' })]),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(storage.upload).not.toHaveBeenCalled();
   });
@@ -384,26 +382,25 @@ describe('ProposalService media', () => {
     ]);
 
     await expect(
-      service.addMedia('u1', 'p1', [], [
-        fakeFile({ mimetype: 'application/pdf' }),
-      ]),
+      service.addMedia(
+        'u1',
+        'p1',
+        [],
+        [fakeFile({ mimetype: 'application/pdf' })],
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects wrong image MIME at service layer', async () => {
     await expect(
-      service.addMedia('u1', 'p1', [
-        fakeFile({ mimetype: 'image/gif' }),
-      ]),
+      service.addMedia('u1', 'p1', [fakeFile({ mimetype: 'image/gif' })]),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('blocks media upload when proposal is not DRAFT', async () => {
     prisma.proposal.findFirst.mockResolvedValue({ status: 'SUBMITTED' });
     await expect(
-      service.addMedia('u1', 'p1', [
-        fakeFile({ mimetype: 'image/jpeg' }),
-      ]),
+      service.addMedia('u1', 'p1', [fakeFile({ mimetype: 'image/jpeg' })]),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 

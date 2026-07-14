@@ -106,9 +106,7 @@ export class ProposalController {
     }
     for (const file of images) {
       if (!IMAGE_MIME_EXT[file.mimetype]) {
-        throw new BadRequestException(
-          'Images must be JPEG, PNG, or WebP',
-        );
+        throw new BadRequestException('Images must be JPEG, PNG, or WebP');
       }
     }
     for (const file of documents) {

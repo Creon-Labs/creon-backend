@@ -28,10 +28,7 @@ describe('CampaignService', () => {
     milestone: { updateMany: milestoneUpdateMany },
     proposalMedia: { updateMany: mediaUpdateMany },
   } as unknown as Prisma.TransactionClient;
-  const service = new CampaignService(
-    {} as PrismaService,
-    makeStorage(),
-  );
+  const service = new CampaignService({} as PrismaService, makeStorage());
 
   beforeEach(() => {
     create.mockClear();
