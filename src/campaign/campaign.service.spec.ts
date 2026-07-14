@@ -16,7 +16,7 @@ function makeStorage() {
     getPresignedDownloadUrl: jest
       .fn()
       .mockResolvedValue('https://signed.example/file'),
-  } as unknown as StorageService;
+  };
 }
 
 describe('CampaignService', () => {
@@ -28,7 +28,10 @@ describe('CampaignService', () => {
     milestone: { updateMany: milestoneUpdateMany },
     proposalMedia: { updateMany: mediaUpdateMany },
   } as unknown as Prisma.TransactionClient;
-  const service = new CampaignService({} as PrismaService, makeStorage());
+  const service = new CampaignService(
+    {} as PrismaService,
+    makeStorage() as unknown as StorageService,
+  );
 
   beforeEach(() => {
     create.mockClear();
@@ -128,7 +131,7 @@ describe('CampaignService public reads', () => {
     const storage = makeStorage();
     const service = new CampaignService(
       prisma as unknown as PrismaService,
-      storage,
+      storage as unknown as StorageService,
     );
     return { service, prisma, storage };
   }
@@ -187,19 +190,19 @@ describe('CampaignService public reads', () => {
 
 /**
  * **Validates: Requirements 1.1, 1.2, 1.3**
- * 
+ *
  * Property 1: Bug Condition - Media Empty When campaignId is NULL
- * 
+ *
  * This test demonstrates the bug where campaigns return empty media arrays
  * when ProposalMedia.campaignId is NULL, even though media exists linked to
  * the proposal.
- * 
+ *
  * Bug Condition: campaign.deployStatus = 'LIVE' AND campaign.proposal.media.length > 0
  *                AND campaign.media.length = 0 (due to campaignId = NULL)
- * 
+ *
  * Expected Behavior (after fix): Media should be retrieved via proposal.media relation,
  * ensuring all media associated with the campaign's proposal is returned.
- * 
+ *
  * CRITICAL: This test WILL FAIL on unfixed code - that failure confirms the bug exists.
  * DO NOT attempt to fix the test when it fails on unfixed code.
  * After implementing the fix, this same test should PASS.
@@ -215,7 +218,7 @@ describe('Property 1: Bug Condition - Campaign Media Empty Bug', () => {
     const storage = makeStorage();
     const service = new CampaignService(
       prisma as unknown as PrismaService,
-      storage,
+      storage as unknown as StorageService,
     );
     return { service, prisma, storage };
   }
@@ -223,13 +226,13 @@ describe('Property 1: Bug Condition - Campaign Media Empty Bug', () => {
   /**
    * Bug Case: Campaign with LIVE status has proposal with uploaded media,
    * but campaign.media returns empty array because ProposalMedia.campaignId = NULL.
-   * 
+   *
    * This simulates the real-world scenario where updateMany() in createForProposal()
    * silently fails to set campaignId on ProposalMedia records.
    */
   it('should return media from proposal relation when campaignId is NULL (bug condition)', async () => {
     const { service, prisma } = makeServiceWithBugCondition();
-    
+
     // Mock data representing the bug condition:
     // - Campaign exists with deployStatus = LIVE
     // - Proposal has media uploaded (3 images)
@@ -299,12 +302,14 @@ describe('Property 1: Bug Condition - Campaign Media Empty Bug', () => {
     expect(result.media).toBeDefined();
     expect(result.media.length).toBe(3);
     expect(result.media.length).toBeGreaterThan(0);
-    
+
     // Verify media URLs are valid presigned URLs
     expect(result.media[0]).toHaveProperty('url');
     expect(result.media[0].url).toMatch(/^https:\/\//);
-    expect(result.media[0].url).toBe('https://cdn.example/proposals/def-456/images/bug-test1.jpg');
-    
+    expect(result.media[0].url).toBe(
+      'https://cdn.example/proposals/def-456/images/bug-test1.jpg',
+    );
+
     // Verify media is sorted by sortOrder ascending
     expect(result.media[0].sortOrder).toBe(0);
     expect(result.media[1].sortOrder).toBe(1);
@@ -313,13 +318,13 @@ describe('Property 1: Bug Condition - Campaign Media Empty Bug', () => {
 
   /**
    * Bug Case for listActive: Multiple campaigns, some with bug condition
-   * 
+   *
    * This tests the list endpoint where campaigns with NULL campaignId return
    * empty media arrays.
    */
   it('should return media for all campaigns in listActive when campaignId is NULL', async () => {
     const { service, prisma } = makeServiceWithBugCondition();
-    
+
     // Mock data for list query with bug condition
     const mockCampaignsData = [
       {
@@ -396,7 +401,7 @@ describe('Property 1: Bug Condition - Campaign Media Empty Bug', () => {
 
     // EXPECTED BEHAVIOR (after fix): All campaigns should have their media returned
     expect(result).toHaveLength(2);
-    
+
     // After fix, these campaigns return media from proposal.media
     expect(result[0].media).toBeDefined();
     expect(result[0].media.length).toBe(1);
@@ -407,17 +412,17 @@ describe('Property 1: Bug Condition - Campaign Media Empty Bug', () => {
 
 /**
  * Property 2: Preservation - Non-Buggy Campaign Queries Unchanged
- * 
+ *
  * This test suite verifies that campaigns which do NOT have the bug condition
  * (campaigns with correctly set campaignId, campaigns with no media, etc.)
  * continue to work correctly both before and after the fix.
- * 
+ *
  * These tests follow the observation-first methodology:
  * 1. Observe behavior on UNFIXED code for non-buggy inputs
  * 2. Write tests capturing that behavior
  * 3. Verify tests PASS on UNFIXED code (baseline)
  * 4. After fix, tests should still PASS (no regressions)
- * 
+ *
  * CRITICAL: These tests SHOULD PASS on unfixed code.
  */
 describe('Property 2: Preservation - Non-Buggy Campaign Queries', () => {
@@ -431,21 +436,21 @@ describe('Property 2: Preservation - Non-Buggy Campaign Queries', () => {
     const storage = makeStorage();
     const service = new CampaignService(
       prisma as unknown as PrismaService,
-      storage,
+      storage as unknown as StorageService,
     );
     return { service, prisma, storage };
   }
 
   /**
    * Preservation Case 1: Campaign with correctly set campaignId returns media
-   * 
+   *
    * This represents campaigns where the updateMany() succeeded and campaignId
    * is properly set on ProposalMedia records. These should work correctly
    * both before and after the fix.
    */
   it('should preserve correct behavior for campaigns with correctly set campaignId', async () => {
     const { service, prisma } = makeService();
-    
+
     // Mock data: campaign.media has records (campaignId is correctly set)
     const mockCampaignData = {
       id: 'camp-correct-1',
@@ -499,9 +504,13 @@ describe('Property 2: Preservation - Non-Buggy Campaign Queries', () => {
     expect(result.media).toBeDefined();
     expect(result.media.length).toBe(2);
     expect(result.media[0]).toHaveProperty('url');
-    expect(result.media[0].url).toBe('https://cdn.example/proposals/p1/images/correct.jpg');
-    expect(result.media[1].url).toBe('https://cdn.example/proposals/p1/images/correct2.png');
-    
+    expect(result.media[0].url).toBe(
+      'https://cdn.example/proposals/p1/images/correct.jpg',
+    );
+    expect(result.media[1].url).toBe(
+      'https://cdn.example/proposals/p1/images/correct2.png',
+    );
+
     // Verify media response format is preserved
     expect(result.media[0]).toHaveProperty('id');
     expect(result.media[0]).toHaveProperty('kind');
@@ -514,13 +523,13 @@ describe('Property 2: Preservation - Non-Buggy Campaign Queries', () => {
 
   /**
    * Preservation Case 2: Campaign with no media returns empty array
-   * 
+   *
    * Campaigns with zero uploaded media files should return empty arrays,
    * both before and after the fix.
    */
   it('should preserve empty media array for campaigns with no media uploaded', async () => {
     const { service, prisma } = makeService();
-    
+
     const mockCampaignData = {
       id: 'camp-no-media-1',
       contractAddress: '0xNOMEDIA',
@@ -556,12 +565,12 @@ describe('Property 2: Preservation - Non-Buggy Campaign Queries', () => {
 
   /**
    * Preservation Case 3: Media sorting by sortOrder is preserved
-   * 
+   *
    * Media should always be sorted by sortOrder ascending, regardless of the fix.
    */
   it('should preserve media sorting by sortOrder ascending', async () => {
     const { service, prisma } = makeService();
-    
+
     const mockCampaignData = {
       id: 'camp-sorted-1',
       contractAddress: '0xSORTED',
@@ -632,13 +641,13 @@ describe('Property 2: Preservation - Non-Buggy Campaign Queries', () => {
 
   /**
    * Preservation Case 4: Campaigns in non-LIVE status are queryable
-   * 
+   *
    * Campaigns in PENDING_DEPLOYMENT and other statuses should continue
    * to be queryable without errors.
    */
   it('should preserve behavior for campaigns in non-LIVE deployment status', async () => {
     const { service, prisma } = makeService();
-    
+
     const mockCampaignData = {
       id: 'camp-pending-1',
       contractAddress: null,
@@ -669,18 +678,18 @@ describe('Property 2: Preservation - Non-Buggy Campaign Queries', () => {
 
     expect(result).toBeDefined();
     expect(result.id).toBe('camp-pending-1');
-    expect(result.deployStatus).toBe(CampaignDeployStatus.PENDING);
+    expect(result.status).toBe(CampaignStatus.PENDING_DEPLOYMENT);
   });
 
   /**
    * Preservation Case 5: Presigned URL generation continues to work
-   * 
+   *
    * The mapMediaToResponse function should continue to generate
    * presigned URLs correctly for all media kinds.
    */
   it('should preserve presigned URL generation for all media', async () => {
     const { service, prisma, storage } = makeService();
-    
+
     const mockCampaignData = {
       id: 'camp-urls-1',
       contractAddress: '0xURLS',
@@ -720,19 +729,23 @@ describe('Property 2: Preservation - Non-Buggy Campaign Queries', () => {
     const result = await service.getPublic('camp-urls-1');
 
     // Verify URL generation was called
-    expect(storage.getPublicUrl).toHaveBeenCalledWith('proposals/p1/images/test.jpg');
-    expect(result.media[0].url).toBe('https://cdn.example/proposals/p1/images/test.jpg');
+    expect(storage.getPublicUrl).toHaveBeenCalledWith(
+      'proposals/p1/images/test.jpg',
+    );
+    expect(result.media[0].url).toBe(
+      'https://cdn.example/proposals/p1/images/test.jpg',
+    );
   });
 
   /**
    * Preservation Case 6: listActive filters by LIVE deployStatus
-   * 
+   *
    * The listActive method should continue to filter campaigns by
    * deployStatus = LIVE.
    */
   it('should preserve LIVE deployment status filtering in listActive', async () => {
     const { service, prisma } = makeService();
-    
+
     prisma.campaign.findMany.mockResolvedValue([
       {
         id: 'camp-live-1',
