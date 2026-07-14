@@ -35,6 +35,14 @@ const PUBLIC_CAMPAIGN_SELECT = {
   startAt: true,
   endAt: true,
   projectToken: { select: { assetCode: true, contractAddress: true } },
+  // Human-readable identity lives on the approved proposal (no title/description
+  // columns on Campaign). Flattened in toPublicResponse.
+  proposal: {
+    select: {
+      businessName: true,
+      businessDescription: true,
+    },
+  },
   media: {
     select: MEDIA_SELECT,
     orderBy: { sortOrder: 'asc' as const },
@@ -126,9 +134,11 @@ export class CampaignService {
   }
 
   private async toPublicResponse(campaign: CampaignWithMedia) {
-    const { media, ...rest } = campaign;
+    const { media, proposal, ...rest } = campaign;
     return {
       ...rest,
+      businessName: proposal.businessName,
+      businessDescription: proposal.businessDescription,
       media: await mapMediaToResponse(this.storage, media),
     };
   }

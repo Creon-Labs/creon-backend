@@ -926,11 +926,19 @@ components:
     Campaign:
       type: object
       description: Public campaign view (list + detail).
-      required: [ id, goalAmount, raisedAmount, status ]
+      required: [ id, businessName, businessDescription, goalAmount, raisedAmount, status ]
       properties:
         id:
           type: string
           format: uuid
+        businessName:
+          type: string
+          description: Display name from the approved proposal (campaign title)
+          example: Warung Bu Sri
+        businessDescription:
+          type: string
+          description: Long-form description from the approved proposal
+          example: Warung makan keluarga di pasar tradisional
         contractAddress:
           type: [ string, 'null' ]
           minLength: 56
