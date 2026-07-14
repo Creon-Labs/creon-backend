@@ -7,6 +7,12 @@ import {
   VaultStatus,
 } from '../../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  mapMediaToResponse,
+  MEDIA_SELECT,
+  type MediaRow,
+} from '../proposal/proposal-media.util';
+import { StorageService } from '../storage/storage.service';
 import { deriveAssetCode, SECONDS_PER_DAY } from './campaign.util';
 
 /** A proposal's fields needed to materialize its campaign. */
@@ -30,7 +36,15 @@ const PUBLIC_CAMPAIGN_SELECT = {
   startAt: true,
   endAt: true,
   projectToken: { select: { assetCode: true, contractAddress: true } },
+  media: {
+    select: MEDIA_SELECT,
+    orderBy: { sortOrder: 'asc' as const },
+  },
 } satisfies Prisma.CampaignSelect;
+
+type CampaignWithMedia = Prisma.CampaignGetPayload<{
+  select: typeof PUBLIC_CAMPAIGN_SELECT;
+}>;
 
 /**
  * Materializes the off-chain Campaign mirror (campaign + share-token + vault rows)
@@ -39,7 +53,10 @@ const PUBLIC_CAMPAIGN_SELECT = {
  */
 @Injectable()
 export class CampaignService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   /**
    * Create the Campaign (+ ProjectToken + CampaignVault) rows for a proposal.
@@ -79,16 +96,22 @@ export class CampaignService {
       where: { proposalId: proposal.id },
       data: { campaignId: campaign.id, status: MilestoneStatus.PENDING },
     });
+    // Same zero-copy link for gallery images + PDF documents.
+    await tx.proposalMedia.updateMany({
+      where: { proposalId: proposal.id },
+      data: { campaignId: campaign.id },
+    });
     return campaign;
   }
 
   /** List campaigns whose contracts are live (open for browsing/investment). */
-  listActive() {
-    return this.prisma.campaign.findMany({
+  async listActive() {
+    const rows = await this.prisma.campaign.findMany({
       where: { deployStatus: CampaignDeployStatus.LIVE },
       orderBy: { startAt: 'desc' },
       select: PUBLIC_CAMPAIGN_SELECT,
     });
+    return Promise.all(rows.map((r) => this.toPublicResponse(r)));
   }
 
   /** Public detail for one campaign. */
@@ -100,6 +123,14 @@ export class CampaignService {
     if (!campaign) {
       throw new NotFoundException('Campaign not found');
     }
-    return campaign;
+    return this.toPublicResponse(campaign);
+  }
+
+  private async toPublicResponse(campaign: CampaignWithMedia) {
+    const { media, ...rest } = campaign;
+    return {
+      ...rest,
+      media: await mapMediaToResponse(this.storage, media as MediaRow[]),
+    };
   }
 }

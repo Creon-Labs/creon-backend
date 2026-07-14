@@ -88,22 +88,26 @@ This process is entirely off-chain (no smart contracts involved yet). All write 
 **Steps:**
 1. Create a Proposal (starts in `DRAFT` status).
 2. Edit the Proposal while it remains a `DRAFT` (optional).
-3. Submit the Proposal → Status changes from `DRAFT` to `SUBMITTED` (this locks editing).
-4. Poll or wait for the admin's decision.
+3. Optionally upload gallery images and/or PDF documents (multipart) while still `DRAFT`.
+4. Submit the Proposal → Status changes from `DRAFT` to `SUBMITTED` (this locks editing and media changes).
+5. Poll or wait for the admin's decision.
 
 **Endpoints:**
 
 | Step | Method + Path | Notes |
 |---|---|---|
-| 1 | `POST /proposals` | `{ businessName, businessDescription, category, location?, requestedAmount, lockPeriodDays, milestones }` → Returns the Proposal (`DRAFT`) |
-| 2 | `PATCH /proposals/:id` | Accepts any subset of the fields above; **only allowed while in `DRAFT` state**. |
-| 3 | `POST /proposals/:id/submit` | Updates status: `DRAFT → SUBMITTED`. |
-| 4 | `GET /proposals` / `GET /proposals/:id` | Returns only the caller's own Proposals (`404` if it belongs to someone else). |
+| 1 | `POST /proposals` | `{ businessName, businessDescription, category, location?, requestedAmount, lockPeriodDays, milestones }` → Returns the Proposal (`DRAFT`) with `media: []` |
+| 2 | `PATCH /proposals/:id` | Accepts any subset of the text/milestone fields; **only allowed while in `DRAFT` state**. |
+| 3 | `POST /proposals/:id/media` | `multipart/form-data` with field(s) `images` (JPEG/PNG/WebP) and/or `documents` (PDF). Max **5 images** and **3 PDFs** per proposal, **≤5 MB** each. Optional. Returns the full Proposal with `media[]` (`url` per item). |
+| 4 | `DELETE /proposals/:id/media/:mediaId` | Remove one media item while `DRAFT`. |
+| 5 | `POST /proposals/:id/submit` | Updates status: `DRAFT → SUBMITTED`. |
+| 6 | `GET /proposals` / `GET /proposals/:id` | Returns only the caller's own Proposals (`404` if it belongs to someone else), including `media[]`. |
 
 **Caveats:**
 - **`requestedAmount` must be a string** (e.g., `"1500.5000000"`, up to 7 decimals). Never send a standard JS `number` for financial values anywhere in this API.
 - **`lockPeriodDays` is an integer between 1–3650**. This dictates the on-chain principal-lock duration after deployment. Ensure the UI clarifies this ("Principal will be locked for X days after the Campaign goes live").
 - **`milestones` is required** — an array of `{ order, title, description, amount }`. `order` must start at 1 and be contiguous integers; each `amount` is a money string; all `amount`s must sum **exactly** to `requestedAmount` (validated server-side, `400` on mismatch). These become the on-chain staged-release schedule — see Flow 8 (Milestone Submission & Voting). `PATCH /proposals/:id` can replace the whole milestone set while still `DRAFT`.
+- **Media is optional** and managed via separate multipart endpoints (not on `POST /proposals`). On admin approval, the same media rows are linked to the new Campaign (no re-upload). Use `media[].url` for thumbnails / PDF links — never expect raw storage keys.
 - **`SUBMITTED` state is read-only** for the Entrepreneur. Poll `GET /proposals/:id` and watch the `status` transition to `UNDER_REVIEW` → `APPROVED` / `REJECTED`.
 
 ---
@@ -121,10 +125,11 @@ When an admin approves a Proposal (`POST /admin/proposals/:id/approve`), the bac
 
 | Method + Path | Notes |
 |---|---|
-| `GET /campaigns` | Public; returns **LIVE** Campaigns only. |
-| `GET /campaigns/:id` | Public; poll both `deployStatus` and `status` here. |
+| `GET /campaigns` | Public; returns **LIVE** Campaigns only, including `media[]` (gallery + PDFs from the approved proposal). |
+| `GET /campaigns/:id` | Public; poll both `deployStatus` and `status` here. Same `media[]` shape as proposals. |
 
 **Caveats:**
+- **Campaign media is the same set uploaded on the Proposal** — linked at approval time. Render gallery images and PDF download links from `media[].url` (`kind` is `IMAGE` or `DOCUMENT`).
 - **Gate the "Invest" action on both `deployStatus === "LIVE"` and `status === "ACTIVE"`** — do not rely solely on the presence of a `contractAddress`. Otherwise, the invest-prepare endpoint will throw a `409 Conflict`.
 - **Investor Whitelist Ordering (Crucial):** An Investor's Wallet must be registered in the on-chain compliance registry before `invest()` will succeed. This happens automatically via an async background job after their KYC is approved, tracked internally as `KycProfile.whitelistStatus` (`NOT_SYNCED → ADDING → WHITELISTED`) — **which is not currently exposed on `GET /kyc/me`**. If an Investor attempts to invest immediately after KYC approval and it fails, the on-chain sync likely hasn't finished yet. Show a "Please try again in a moment" message rather than a hard system error.
 - **Unlock is fully automatic** — once `Campaign.lockEndAt` passes, a background job calls the on-chain `unlock()` with no admin or user action required. Poll `unlockStatus` on `GET /campaigns/:id`; once it reaches `UNLOCKED`, shares are transferable P2P to any other whitelisted address (this is separate from investing — there is no in-app secondary market/AMM).

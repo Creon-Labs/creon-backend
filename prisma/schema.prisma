@@ -143,6 +143,13 @@ enum VoteChoice {
   REJECT
 }
 
+// Marketplace media attached to a proposal (gallery images + optional PDFs).
+// Linked to Campaign on approval via campaignId — same pattern as Milestone.
+enum ProposalMediaKind {
+  IMAGE
+  DOCUMENT
+}
+
 // ---------- models ----------
 model User {
   id            String   @id @default(uuid()) @db.Uuid
@@ -217,6 +224,7 @@ model Proposal {
   reviews      ProposalReview[]
   campaign     Campaign?
   milestones   Milestone[]
+  media        ProposalMedia[]
 
   @@index([status])
   @@index([entrepreneurId])
@@ -269,9 +277,33 @@ model Campaign {
   distributions ProfitDistribution[]
   refund        Refund?
   milestones    Milestone[]
+  media         ProposalMedia[]
 
   @@index([status])
   @@map("campaigns")
+}
+
+// Gallery images + optional PDF documents for a proposal. On admin approval the
+// rows are linked to the new Campaign via campaignId (no object-store copy).
+model ProposalMedia {
+  id           String            @id @default(uuid()) @db.Uuid
+  proposalId   String            @map("proposal_id") @db.Uuid
+  campaignId   String?           @map("campaign_id") @db.Uuid // set at proposal approval
+  kind         ProposalMediaKind
+  objectKey    String            @map("object_key")
+  mimeType     String            @map("mime_type") @db.VarChar(127)
+  originalName String?           @map("original_name")
+  sizeBytes    Int               @map("size_bytes")
+  sortOrder    Int               @default(0) @map("sort_order")
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  proposal Proposal  @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([proposalId, kind])
+  @@index([campaignId])
+  @@map("proposal_media")
 }
 
 model ProjectToken {

@@ -4,15 +4,31 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { Prisma } from '../../generated/prisma/client';
-import { MilestoneStatus, ProposalStatus } from '../../generated/prisma/enums';
+import {
+  MilestoneStatus,
+  ProposalMediaKind,
+  ProposalStatus,
+} from '../../generated/prisma/enums';
 import { toStroops } from '../campaign/campaign.util';
+import type { UploadedFile } from '../kyc/uploaded-file';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import {
   CreateMilestoneDto,
   CreateProposalDto,
 } from './dto/create-proposal.dto';
 import { UpdateProposalDto } from './dto/update-proposal.dto';
+import {
+  DOCUMENT_MIME_EXT,
+  IMAGE_MIME_EXT,
+  mapMediaToResponse,
+  MAX_DOCUMENTS,
+  MAX_IMAGES,
+  MEDIA_SELECT,
+  type MediaRow,
+} from './proposal-media.util';
 
 /** Fields returned to the entrepreneur for their own proposals. */
 const PROPOSAL_SELECT = {
@@ -45,7 +61,15 @@ const PROPOSAL_SELECT = {
     },
     orderBy: { order: 'asc' },
   },
+  media: {
+    select: MEDIA_SELECT,
+    orderBy: { sortOrder: 'asc' as const },
+  },
 } satisfies Prisma.ProposalSelect;
+
+type ProposalWithMedia = Prisma.ProposalGetPayload<{
+  select: typeof PROPOSAL_SELECT;
+}>;
 
 /**
  * Entrepreneur-facing proposal lifecycle (off-chain only — no Campaign row, no
@@ -55,15 +79,22 @@ const PROPOSAL_SELECT = {
  *
  * Milestones are authored here with the proposal (nested create) and are pinned
  * on-chain at approval; their amounts must sum exactly to `requestedAmount`.
+ *
+ * Media (gallery images + optional PDFs) is managed separately while DRAFT via
+ * {@link addMedia} / {@link removeMedia}; on approval the rows are linked to the
+ * new Campaign (same pattern as milestones).
  */
 @Injectable()
 export class ProposalService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   async create(userId: string, dto: CreateProposalDto) {
     this.assertPositiveAmount(dto.requestedAmount);
     this.assertMilestonesValid(dto.milestones, dto.requestedAmount);
-    return this.prisma.proposal.create({
+    const proposal = await this.prisma.proposal.create({
       data: {
         entrepreneurId: userId,
         businessName: dto.businessName,
@@ -77,15 +108,17 @@ export class ProposalService {
       },
       select: PROPOSAL_SELECT,
     });
+    return this.toResponse(proposal);
   }
 
   /** The caller's own proposals, newest first. */
-  listMine(userId: string) {
-    return this.prisma.proposal.findMany({
+  async listMine(userId: string) {
+    const rows = await this.prisma.proposal.findMany({
       where: { entrepreneurId: userId },
       orderBy: { createdAt: 'desc' },
       select: PROPOSAL_SELECT,
     });
+    return Promise.all(rows.map((r) => this.toResponse(r)));
   }
 
   async getMine(userId: string, id: string) {
@@ -96,7 +129,7 @@ export class ProposalService {
     if (!proposal) {
       throw new NotFoundException('Proposal not found');
     }
-    return proposal;
+    return this.toResponse(proposal);
   }
 
   async update(userId: string, id: string, dto: UpdateProposalDto) {
@@ -128,7 +161,7 @@ export class ProposalService {
       this.assertMilestonesValid(effectiveMilestones, effectiveAmount);
     }
 
-    return this.prisma.proposal.update({
+    const proposal = await this.prisma.proposal.update({
       where: { id },
       data: {
         ...rest,
@@ -142,15 +175,137 @@ export class ProposalService {
       },
       select: PROPOSAL_SELECT,
     });
+    return this.toResponse(proposal);
   }
 
   async submit(userId: string, id: string) {
     await this.assertOwnedDraft(userId, id);
-    return this.prisma.proposal.update({
+    const proposal = await this.prisma.proposal.update({
       where: { id },
       data: { status: ProposalStatus.SUBMITTED, submittedAt: new Date() },
       select: PROPOSAL_SELECT,
     });
+    return this.toResponse(proposal);
+  }
+
+  /**
+   * Upload gallery images and/or PDF documents onto a DRAFT proposal.
+   * Caps: {@link MAX_IMAGES} images, {@link MAX_DOCUMENTS} documents per proposal.
+   */
+  async addMedia(
+    userId: string,
+    proposalId: string,
+    images: UploadedFile[] = [],
+    documents: UploadedFile[] = [],
+  ) {
+    if (images.length === 0 && documents.length === 0) {
+      throw new BadRequestException(
+        'At least one image or document file is required',
+      );
+    }
+    await this.assertOwnedDraft(userId, proposalId);
+
+    const existing = await this.prisma.proposalMedia.groupBy({
+      by: ['kind'],
+      where: { proposalId },
+      _count: { _all: true },
+      _max: { sortOrder: true },
+    });
+    const imageCount =
+      existing.find((e) => e.kind === ProposalMediaKind.IMAGE)?._count._all ??
+      0;
+    const docCount =
+      existing.find((e) => e.kind === ProposalMediaKind.DOCUMENT)?._count
+        ._all ?? 0;
+    const maxSort =
+      existing.reduce(
+        (acc, e) => Math.max(acc, e._max.sortOrder ?? -1),
+        -1,
+      ) ?? -1;
+
+    if (imageCount + images.length > MAX_IMAGES) {
+      throw new BadRequestException(
+        `A proposal may have at most ${MAX_IMAGES} images (currently ${imageCount})`,
+      );
+    }
+    if (docCount + documents.length > MAX_DOCUMENTS) {
+      throw new BadRequestException(
+        `A proposal may have at most ${MAX_DOCUMENTS} documents (currently ${docCount})`,
+      );
+    }
+
+    let sortOrder = maxSort + 1;
+    const creates: Prisma.ProposalMediaCreateManyInput[] = [];
+
+    for (const file of images) {
+      const ext = IMAGE_MIME_EXT[file.mimetype];
+      if (!ext) {
+        throw new BadRequestException(
+          'Images must be JPEG, PNG, or WebP',
+        );
+      }
+      const key = `proposals/${proposalId}/images/${randomUUID()}.${ext}`;
+      await this.storage.upload(key, file.buffer, file.mimetype);
+      creates.push({
+        id: randomUUID(),
+        proposalId,
+        kind: ProposalMediaKind.IMAGE,
+        objectKey: key,
+        mimeType: file.mimetype,
+        originalName: file.originalname,
+        sizeBytes: file.size,
+        sortOrder: sortOrder++,
+      });
+    }
+
+    for (const file of documents) {
+      const ext = DOCUMENT_MIME_EXT[file.mimetype];
+      if (!ext) {
+        throw new BadRequestException('Documents must be PDF files');
+      }
+      const key = `proposals/${proposalId}/documents/${randomUUID()}.${ext}`;
+      await this.storage.upload(key, file.buffer, file.mimetype);
+      creates.push({
+        id: randomUUID(),
+        proposalId,
+        kind: ProposalMediaKind.DOCUMENT,
+        objectKey: key,
+        mimeType: file.mimetype,
+        originalName: file.originalname,
+        sizeBytes: file.size,
+        sortOrder: sortOrder++,
+      });
+    }
+
+    await this.prisma.proposalMedia.createMany({ data: creates });
+
+    const proposal = await this.prisma.proposal.findFirstOrThrow({
+      where: { id: proposalId, entrepreneurId: userId },
+      select: PROPOSAL_SELECT,
+    });
+    return this.toResponse(proposal);
+  }
+
+  /** Remove one media item from a DRAFT proposal (object store + DB row). */
+  async removeMedia(userId: string, proposalId: string, mediaId: string) {
+    await this.assertOwnedDraft(userId, proposalId);
+
+    const media = await this.prisma.proposalMedia.findFirst({
+      where: { id: mediaId, proposalId },
+      select: { id: true, objectKey: true },
+    });
+    if (!media) {
+      throw new NotFoundException('Media not found');
+    }
+
+    await this.storage.delete(media.objectKey);
+    await this.prisma.proposalMedia.delete({ where: { id: media.id } });
+
+    const proposal = await this.prisma.proposal.findFirstOrThrow({
+      where: { id: proposalId, entrepreneurId: userId },
+      select: PROPOSAL_SELECT,
+    });
+    return this.toResponse(proposal);
   }
 
   /** A proposal can only be edited / submitted by its owner while still a DRAFT. */
@@ -208,6 +363,15 @@ export class ProposalService {
         'milestone amounts must sum exactly to requestedAmount',
       );
     }
+  }
+
+  /** Strip objectKey and attach downloadable URLs for each media row. */
+  private async toResponse(proposal: ProposalWithMedia) {
+    const { media, ...rest } = proposal;
+    return {
+      ...rest,
+      media: await mapMediaToResponse(this.storage, media as MediaRow[]),
+    };
   }
 }
 

@@ -4,6 +4,7 @@ import { ProposalStatus, ReviewDecision } from '../../generated/prisma/enums';
 import { CampaignService } from '../campaign/campaign.service';
 import { CampaignDeployService } from '../campaign/campaign-deploy.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import { AdminProposalService } from './admin-proposal.service';
 
 function makeDeps() {
@@ -12,7 +13,10 @@ function makeDeps() {
     proposalReview: { create: jest.fn().mockResolvedValue({}) },
   };
   const prisma = {
-    proposal: { findUnique: jest.fn() },
+    proposal: {
+      findUnique: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     $transaction: jest.fn((cb: (tx: typeof txClient) => unknown) =>
       cb(txClient),
     ),
@@ -21,12 +25,19 @@ function makeDeps() {
     createForProposal: jest.fn().mockResolvedValue({ id: 'camp-1' }),
   };
   const deploy = { enqueue: jest.fn().mockResolvedValue(undefined) };
+  const storage = {
+    getPublicUrl: jest.fn((key: string) => `https://cdn.example/${key}`),
+    getPresignedDownloadUrl: jest
+      .fn()
+      .mockResolvedValue('https://signed.example/file'),
+  };
   const service = new AdminProposalService(
     prisma as unknown as PrismaService,
     campaigns as unknown as CampaignService,
     deploy as unknown as CampaignDeployService,
+    storage as unknown as StorageService,
   );
-  return { service, prisma, txClient, campaigns, deploy };
+  return { service, prisma, txClient, campaigns, deploy, storage };
 }
 
 const submitted = {
@@ -126,5 +137,45 @@ describe('AdminProposalService.reject', () => {
       proposalId: 'prop-1',
       status: ProposalStatus.REJECTED,
     });
+  });
+});
+
+describe('AdminProposalService.list', () => {
+  it('includes media URLs for admin review', async () => {
+    const { service, prisma } = makeDeps();
+    prisma.proposal.findMany.mockResolvedValue([
+      {
+        id: 'prop-1',
+        businessName: 'Warung',
+        category: 'Kuliner',
+        location: null,
+        requestedAmount: new Prisma.Decimal('1000'),
+        lockPeriodDays: 30,
+        status: ProposalStatus.SUBMITTED,
+        submittedAt: new Date(),
+        entrepreneur: { walletAddress: 'GABC', email: null },
+        media: [
+          {
+            id: 'm1',
+            kind: 'IMAGE',
+            mimeType: 'image/jpeg',
+            originalName: 'a.jpg',
+            sizeBytes: 10,
+            sortOrder: 0,
+            objectKey: 'proposals/prop-1/images/a.jpg',
+            createdAt: new Date(),
+          },
+        ],
+      },
+    ]);
+
+    const rows = await service.list(ProposalStatus.SUBMITTED);
+    expect(rows[0].media[0]).toEqual(
+      expect.objectContaining({
+        id: 'm1',
+        url: 'https://cdn.example/proposals/prop-1/images/a.jpg',
+      }),
+    );
+    expect(rows[0].media[0]).not.toHaveProperty('objectKey');
   });
 });

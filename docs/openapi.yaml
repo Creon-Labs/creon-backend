@@ -761,6 +761,11 @@ components:
             email:
               type: [ string, 'null' ]
               format: email
+        media:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProposalMedia'
+          description: Gallery images + PDFs for admin review (with downloadable urls)
 
     AdminApproveProposalResponse:
       type: object
@@ -869,6 +874,54 @@ components:
           items:
             $ref: '#/components/schemas/ProposalMilestone'
           description: The proposal's staged release schedule, ordered.
+        media:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProposalMedia'
+          description: |
+            Gallery images + optional PDF documents uploaded while DRAFT.
+            On admin approval these rows are linked to the Campaign (same object keys).
+
+    ProposalMedia:
+      type: object
+      description: |
+        One gallery image or PDF document attached to a proposal (and, after approval,
+        to its campaign). `url` is a public asset URL when `R2_PUBLIC_URL` is set,
+        otherwise a short-lived presigned GET. Raw object keys are never returned.
+      required:
+        - id
+        - kind
+        - mimeType
+        - sizeBytes
+        - sortOrder
+        - url
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [ IMAGE, DOCUMENT ]
+        mimeType:
+          type: string
+          example: image/jpeg
+        originalName:
+          type: [ string, 'null' ]
+          example: toko-depan.jpg
+        sizeBytes:
+          type: integer
+          example: 245001
+        sortOrder:
+          type: integer
+          example: 0
+        url:
+          type: string
+          format: uri
+          example: http://localhost:9000/creon-assets/proposals/.../images/....jpg
+        createdAt:
+          type: string
+          format: date-time
 
     Campaign:
       type: object
@@ -920,6 +973,13 @@ components:
               minLength: 56
               maxLength: 56
               description: ShareToken contract address (C…); null until deployed
+        media:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProposalMedia'
+          description: |
+            Gallery images + PDF documents carried over from the approved proposal
+            (zero-copy link on approval).
 
     PrepareInvestmentResponse:
       type: object
@@ -2553,6 +2613,130 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: Proposal is not a DRAFT (cannot be submitted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /proposals/{id}/media:
+    post:
+      tags: [ proposals ]
+      summary: Upload Media Proposal (Gambar / PDF)
+      description: |
+        Mengunggah gambar galeri dan/atau dokumen PDF ke proposal yang masih `DRAFT`.
+        Media bersifat opsional. Saat admin menyetujui proposal, media yang sama
+        otomatis menjadi bagian dari Campaign (tanpa upload ulang).
+
+        **Untuk Frontend Entrepreneur:**
+        - Field multipart: `images` (JPEG/PNG/WebP, max 5 total per proposal, ≤5 MB/file)
+          dan `documents` (PDF, max 3 total per proposal, ≤5 MB/file).
+        - Minimal satu file di salah satu field.
+        - Response adalah Proposal lengkap termasuk array `media` dengan `url`.
+      operationId: proposalAddMedia
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the proposal
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                images:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: Gallery images (JPEG, PNG, or WebP; max 5 MB each)
+                documents:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: PDF documents (max 5 MB each)
+      responses:
+        '201':
+          description: Media uploaded; full proposal with media URLs returned
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Proposal'
+        '400':
+          description: Validation error (MIME, empty upload, or cap exceeded)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Proposal is not a DRAFT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /proposals/{id}/media/{mediaId}:
+    delete:
+      tags: [ proposals ]
+      summary: Hapus Satu Media Proposal
+      description: |
+        Menghapus satu item media dari proposal yang masih `DRAFT` (object store + DB).
+      operationId: proposalRemoveMedia
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the proposal
+        - name: mediaId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the media row
+      responses:
+        '200':
+          description: Media removed; full proposal returned
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Proposal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Proposal is not a DRAFT
           content:
             application/json:
               schema:

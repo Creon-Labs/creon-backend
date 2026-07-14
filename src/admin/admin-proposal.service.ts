@@ -7,6 +7,12 @@ import { ProposalStatus, ReviewDecision } from '../../generated/prisma/enums';
 import { CampaignService } from '../campaign/campaign.service';
 import { CampaignDeployService } from '../campaign/campaign-deploy.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  mapMediaToResponse,
+  MEDIA_SELECT,
+  type MediaRow,
+} from '../proposal/proposal-media.util';
+import { StorageService } from '../storage/storage.service';
 
 /** Statuses from which an admin may still act on a proposal. */
 const REVIEWABLE: ProposalStatus[] = [
@@ -25,11 +31,12 @@ export class AdminProposalService {
     private readonly prisma: PrismaService,
     private readonly campaigns: CampaignService,
     private readonly deploy: CampaignDeployService,
+    private readonly storage: StorageService,
   ) {}
 
   /** List proposals awaiting review; defaults handled by the controller. */
-  list(status: ProposalStatus) {
-    return this.prisma.proposal.findMany({
+  async list(status: ProposalStatus) {
+    const rows = await this.prisma.proposal.findMany({
       where: { status },
       orderBy: { submittedAt: 'asc' },
       select: {
@@ -42,8 +49,21 @@ export class AdminProposalService {
         status: true,
         submittedAt: true,
         entrepreneur: { select: { walletAddress: true, email: true } },
+        media: {
+          select: MEDIA_SELECT,
+          orderBy: { sortOrder: 'asc' as const },
+        },
       },
     });
+    return Promise.all(
+      rows.map(async (row) => {
+        const { media, ...rest } = row;
+        return {
+          ...rest,
+          media: await mapMediaToResponse(this.storage, media as MediaRow[]),
+        };
+      }),
+    );
   }
 
   /**

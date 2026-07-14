@@ -7,20 +7,36 @@ import {
   VaultStatus,
 } from '../../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import { CampaignService } from './campaign.service';
+
+function makeStorage() {
+  return {
+    getPublicUrl: jest.fn((key: string) => `https://cdn.example/${key}`),
+    getPresignedDownloadUrl: jest
+      .fn()
+      .mockResolvedValue('https://signed.example/file'),
+  } as unknown as StorageService;
+}
 
 describe('CampaignService', () => {
   const create = jest.fn().mockResolvedValue({ id: 'camp-1' });
-  const updateMany = jest.fn().mockResolvedValue({ count: 2 });
+  const milestoneUpdateMany = jest.fn().mockResolvedValue({ count: 2 });
+  const mediaUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
   const tx = {
     campaign: { create },
-    milestone: { updateMany },
+    milestone: { updateMany: milestoneUpdateMany },
+    proposalMedia: { updateMany: mediaUpdateMany },
   } as unknown as Prisma.TransactionClient;
-  const service = new CampaignService({} as PrismaService);
+  const service = new CampaignService(
+    {} as PrismaService,
+    makeStorage(),
+  );
 
   beforeEach(() => {
     create.mockClear();
-    updateMany.mockClear();
+    milestoneUpdateMany.mockClear();
+    mediaUpdateMany.mockClear();
   });
 
   const proposal = {
@@ -69,9 +85,17 @@ describe('CampaignService', () => {
 
   it('links the proposal milestones to the new campaign (PENDING)', async () => {
     await service.createForProposal(tx, proposal);
-    expect(updateMany).toHaveBeenCalledWith({
+    expect(milestoneUpdateMany).toHaveBeenCalledWith({
       where: { proposalId: 'prop-1' },
       data: { campaignId: 'camp-1', status: MilestoneStatus.PENDING },
+    });
+  });
+
+  it('links proposal media to the new campaign (no object copy)', async () => {
+    await service.createForProposal(tx, proposal);
+    expect(mediaUpdateMany).toHaveBeenCalledWith({
+      where: { proposalId: 'prop-1' },
+      data: { campaignId: 'camp-1' },
     });
   });
 });
@@ -80,18 +104,49 @@ describe('CampaignService public reads', () => {
   function makeService() {
     const prisma = {
       campaign: {
-        findMany: jest.fn().mockResolvedValue([{ id: 'camp-1' }]),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'camp-1',
+            media: [
+              {
+                id: 'm1',
+                kind: 'IMAGE',
+                mimeType: 'image/jpeg',
+                originalName: 'a.jpg',
+                sizeBytes: 10,
+                sortOrder: 0,
+                objectKey: 'proposals/p1/images/a.jpg',
+                createdAt: new Date(),
+              },
+            ],
+          },
+        ]),
         findUnique: jest.fn(),
       },
     };
-    const service = new CampaignService(prisma as unknown as PrismaService);
-    return { service, prisma };
+    const storage = makeStorage();
+    const service = new CampaignService(
+      prisma as unknown as PrismaService,
+      storage,
+    );
+    return { service, prisma, storage };
   }
 
-  it('listActive returns only LIVE-deployed campaigns', async () => {
+  it('listActive returns only LIVE-deployed campaigns with media URLs', async () => {
     const { service, prisma } = makeService();
     const result = await service.listActive();
-    expect(result).toEqual([{ id: 'camp-1' }]);
+    expect(result).toEqual([
+      {
+        id: 'camp-1',
+        media: [
+          expect.objectContaining({
+            id: 'm1',
+            url: 'https://cdn.example/proposals/p1/images/a.jpg',
+          }),
+        ],
+      },
+    ]);
+    expect(result[0].media[0]).not.toHaveProperty('objectKey');
     expect(prisma.campaign.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { deployStatus: CampaignDeployStatus.LIVE },
@@ -101,9 +156,13 @@ describe('CampaignService public reads', () => {
 
   it('getPublic returns the campaign when found', async () => {
     const { service, prisma } = makeService();
-    prisma.campaign.findUnique.mockResolvedValue({ id: 'camp-1' });
+    prisma.campaign.findUnique.mockResolvedValue({
+      id: 'camp-1',
+      media: [],
+    });
     await expect(service.getPublic('camp-1')).resolves.toEqual({
       id: 'camp-1',
+      media: [],
     });
   });
 

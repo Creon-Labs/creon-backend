@@ -88,22 +88,26 @@ Hanya berjalan *off-chain* — tidak berinteraksi dengan *contract*. Semua *rout
 **Langkah-langkah:**
 1. Buat *Proposal* (dimulai dengan status `DRAFT`).
 2. Edit selama masih `DRAFT` (opsional).
-3. Lakukan *submit* → `DRAFT → SUBMITTED` (mengunci akses edit).
-4. *Polling* untuk menunggu keputusan admin.
+3. Opsional: unggah gambar galeri dan/atau dokumen PDF (multipart) selama masih `DRAFT`.
+4. Lakukan *submit* → `DRAFT → SUBMITTED` (mengunci akses edit dan perubahan media).
+5. *Polling* untuk menunggu keputusan admin.
 
 **Endpoints:**
 
 | Langkah | Method + Path | Catatan |
 |---|---|---|
-| 1 | `POST /proposals` | `{ businessName, businessDescription, category, location?, requestedAmount, lockPeriodDays, milestones }` → kembaliannya berupa data Proposal (`DRAFT`) |
-| 2 | `PATCH /proposals/:id` | Boleh mengirim sebagian *field* di atas; **hanya bisa saat status `DRAFT`** |
-| 3 | `POST /proposals/:id/submit` | `DRAFT → SUBMITTED` |
-| 4 | `GET /proposals` / `GET /proposals/:id` | Hanya bisa mengakses milik pemanggil API (404 jika bukan milik mereka) |
+| 1 | `POST /proposals` | `{ businessName, businessDescription, category, location?, requestedAmount, lockPeriodDays, milestones }` → kembaliannya berupa data Proposal (`DRAFT`) dengan `media: []` |
+| 2 | `PATCH /proposals/:id` | Boleh mengirim sebagian *field* teks/milestone di atas; **hanya bisa saat status `DRAFT`** |
+| 3 | `POST /proposals/:id/media` | `multipart/form-data` dengan field `images` (JPEG/PNG/WebP) dan/atau `documents` (PDF). Maks **5 gambar** dan **3 PDF** per proposal, **≤5 MB**/file. Opsional. Mengembalikan Proposal lengkap dengan `media[]` (`url` per item). |
+| 4 | `DELETE /proposals/:id/media/:mediaId` | Hapus satu item media selama masih `DRAFT`. |
+| 5 | `POST /proposals/:id/submit` | `DRAFT → SUBMITTED` |
+| 6 | `GET /proposals` / `GET /proposals/:id` | Hanya milik pemanggil (404 jika bukan), termasuk `media[]`. |
 
 **Catatan Penting:**
 - **`requestedAmount` adalah tipe string** (contoh: `"1500.5000000"`, mendukung hingga 7 desimal) — jangan pernah mengirim tipe JS `number` untuk nominal uang di mana pun dalam API ini.
 - **`lockPeriodDays` adalah integer 1–3650** → nilai ini akan menjadi durasi *lock* modal *on-chain* setelah proses *deploy*; buat pengertiannya jelas di UI ("modal terkunci selama X hari setelah *Campaign* berjalan").
 - **`milestones` wajib diisi** — sebuah array berisi `{ order, title, description, amount }`. `order` harus dimulai dari 1 dan berurutan (kontigu); setiap `amount` berbentuk string nominal uang; seluruh `amount` harus berjumlah **persis sama** dengan `requestedAmount` (divalidasi di sisi server, `400` jika tidak cocok). Data ini akan menjadi jadwal pencairan dana bertahap secara *on-chain* — lihat Flow 8 (Submit Milestone & Voting). `PATCH /proposals/:id` bisa mengganti seluruh set milestone selama masih berstatus `DRAFT`.
+- **Media bersifat opsional** dan dikelola lewat endpoint multipart terpisah (bukan di `POST /proposals`). Saat admin approve, media yang sama dilink ke Campaign baru (tanpa upload ulang). Gunakan `media[].url` untuk thumbnail / tautan PDF — jangan mengharapkan raw storage key.
 - **Status SUBMITTED bersifat read-only** bagi *Entrepreneur* — lakukan *polling* `GET /proposals/:id` dan pantau perpindahan `status` ke `UNDER_REVIEW` → `APPROVED` / `REJECTED`.
 
 ---
@@ -121,10 +125,11 @@ Ketika admin menyetujui sebuah *Proposal* (`POST /admin/proposals/:id/approve`),
 
 | Method + Path | Catatan |
 |---|---|
-| `GET /campaigns` | public; hanya mengembalikan *Campaign* berstatus **LIVE** |
-| `GET /campaigns/:id` | public; lakukan *polling* `deployStatus` / `status` di sini |
+| `GET /campaigns` | public; hanya *Campaign* **LIVE**, termasuk `media[]` (galeri + PDF dari proposal yang disetujui). |
+| `GET /campaigns/:id` | public; *polling* `deployStatus` / `status` di sini. Bentuk `media[]` sama dengan proposal. |
 
 **Catatan Penting:**
+- **Media Campaign adalah set yang sama yang diunggah di Proposal** — dilink saat approval. Render galeri dan tautan PDF dari `media[].url` (`kind` = `IMAGE` atau `DOCUMENT`).
 - **Kunci aksi "Invest" berdasarkan kombinasi `deployStatus === "LIVE"` dan `status === "ACTIVE"`** — jangan hanya mengecek keberadaan `contractAddress`. Jika tidak, *endpoint* invest-prepare akan menghasilkan *error* 409.
 - **Urutan whitelist Investor (sangat penting):** *Wallet* seorang *Investor* harus ditambahkan ke sistem registri kepatuhan (*compliance registry*) *on-chain* sebelum fungsi `invest()` berhasil dieksekusi. Ini terjadi secara otomatis setelah KYC disetujui lewat proses asinkron terpisah, yang dilacak melalui `KycProfile.whitelistStatus` (`NOT_SYNCED → ADDING → WHITELISTED`) — **saat ini field tersebut tidak diekspos pada `GET /kyc/me`**. Jadi, jika aksi `invest` pertama seorang *Investor* gagal tepat sesaat setelah KYC mereka disetujui, kemungkinan besar sinkronisasi *whitelist* *on-chain* belum selesai — tampilkan pesan "silakan coba lagi dalam beberapa saat" (*retry/backoff message*), bukan peringatan *error* sistem (karena *contract* menolak fungsi `invest()` untuk alamat yang belum masuk *whitelist*).
 - **Unlock terjadi sepenuhnya otomatis** — begitu `Campaign.lockEndAt` terlewati, sebuah *background job* memanggil `unlock()` *on-chain* tanpa perlu aksi admin maupun pengguna. Pantau `unlockStatus` pada `GET /campaigns/:id`; setelah bernilai `UNLOCKED`, saham bisa ditransfer P2P ke alamat *whitelisted* lain (ini terpisah dari proses *invest* — belum ada *secondary market*/AMM di dalam aplikasi).
