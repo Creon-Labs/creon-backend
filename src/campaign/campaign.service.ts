@@ -10,7 +10,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   mapMediaToResponse,
   MEDIA_SELECT,
-  type MediaRow,
 } from '../proposal/proposal-media.util';
 import { StorageService } from '../storage/storage.service';
 import { deriveAssetCode, SECONDS_PER_DAY } from './campaign.util';
@@ -130,7 +129,7 @@ export class CampaignService {
     const { media, ...rest } = campaign;
     return {
       ...rest,
-      media: await mapMediaToResponse(this.storage, media as MediaRow[]),
+      media: await mapMediaToResponse(this.storage, media),
     };
   }
 }

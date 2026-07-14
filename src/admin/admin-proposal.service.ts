@@ -10,7 +10,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   mapMediaToResponse,
   MEDIA_SELECT,
-  type MediaRow,
 } from '../proposal/proposal-media.util';
 import { StorageService } from '../storage/storage.service';
 
@@ -60,7 +59,7 @@ export class AdminProposalService {
         const { media, ...rest } = row;
         return {
           ...rest,
-          media: await mapMediaToResponse(this.storage, media as MediaRow[]),
+          media: await mapMediaToResponse(this.storage, media),
         };
       }),
     );

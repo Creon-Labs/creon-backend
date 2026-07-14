@@ -27,7 +27,6 @@ import {
   MAX_DOCUMENTS,
   MAX_IMAGES,
   MEDIA_SELECT,
-  type MediaRow,
 } from './proposal-media.util';
 
 /** Fields returned to the entrepreneur for their own proposals. */
@@ -218,10 +217,8 @@ export class ProposalService {
       existing.find((e) => e.kind === ProposalMediaKind.DOCUMENT)?._count
         ._all ?? 0;
     const maxSort =
-      existing.reduce(
-        (acc, e) => Math.max(acc, e._max.sortOrder ?? -1),
-        -1,
-      ) ?? -1;
+      existing.reduce((acc, e) => Math.max(acc, e._max.sortOrder ?? -1), -1) ??
+      -1;
 
     if (imageCount + images.length > MAX_IMAGES) {
       throw new BadRequestException(
@@ -240,9 +237,7 @@ export class ProposalService {
     for (const file of images) {
       const ext = IMAGE_MIME_EXT[file.mimetype];
       if (!ext) {
-        throw new BadRequestException(
-          'Images must be JPEG, PNG, or WebP',
-        );
+        throw new BadRequestException('Images must be JPEG, PNG, or WebP');
       }
       const key = `proposals/${proposalId}/images/${randomUUID()}.${ext}`;
       await this.storage.upload(key, file.buffer, file.mimetype);
@@ -370,7 +365,7 @@ export class ProposalService {
     const { media, ...rest } = proposal;
     return {
       ...rest,
-      media: await mapMediaToResponse(this.storage, media as MediaRow[]),
+      media: await mapMediaToResponse(this.storage, media),
     };
   }
 }
