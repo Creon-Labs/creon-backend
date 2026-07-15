@@ -183,7 +183,7 @@ describe('AdminProposalService.list', () => {
       expect.objectContaining({
         select: expect.objectContaining({
           campaign: { select: { id: true } },
-        }),
+        }) as unknown,
       }),
     );
   });
