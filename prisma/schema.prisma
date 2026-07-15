@@ -214,6 +214,7 @@ model Proposal {
   category            String
   location            String?
   requestedAmount     Decimal        @map("requested_amount") @db.Decimal(28, 7)
+  fundingDurationDays Int            @map("funding_duration_days")
   lockPeriodDays      Int            @map("lock_period_days")
   status              ProposalStatus @default(DRAFT)
   submittedAt         DateTime?      @map("submitted_at") @db.Timestamptz

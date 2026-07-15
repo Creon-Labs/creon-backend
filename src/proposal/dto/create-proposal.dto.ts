@@ -69,6 +69,12 @@ export class CreateProposalDto {
   })
   requestedAmount!: string;
 
+  /** Funding window, beginning when the on-chain campaign is deployed. */
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  fundingDurationDays!: number;
+
   @IsInt()
   @Min(1)
   @Max(3650)

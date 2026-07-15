@@ -48,6 +48,12 @@ export class UpdateProposalDto {
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(90)
+  fundingDurationDays?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
   @Max(3650)
   lockPeriodDays?: number;
 

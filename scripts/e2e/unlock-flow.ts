@@ -194,6 +194,7 @@ async function main() {
       location: 'Jakarta',
       requestedAmount: '100.0000000',
       lockPeriodDays: 1,
+      fundingDurationDays: 30,
       milestones: [
         { order: 1, title: 'Single milestone', description: 'Not released in this test', amount: '100.0000000' },
       ],

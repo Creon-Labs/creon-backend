@@ -260,6 +260,7 @@ async function createAndApproveCampaign(
       location: 'Jakarta',
       requestedAmount: input.requestedAmount,
       lockPeriodDays: 30,
+      fundingDurationDays: 30,
       milestones: input.milestones,
     },
   });

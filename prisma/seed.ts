@@ -98,6 +98,7 @@ async function main(): Promise<void> {
         category: 'Kuliner',
         location: 'Yogyakarta',
         requestedAmount: '10000.0000000',
+        fundingDurationDays: 30,
         lockPeriodDays: 180,
         status: ProposalStatus.DRAFT,
       },

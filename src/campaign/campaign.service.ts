@@ -19,6 +19,7 @@ export interface ProposalForCampaign {
   id: string;
   businessName: string;
   requestedAmount: Prisma.Decimal;
+  fundingDurationDays: number;
   lockPeriodDays: number;
 }
 
