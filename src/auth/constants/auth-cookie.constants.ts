@@ -18,8 +18,16 @@ export const AUTH_COOKIE_NAME = 'creon_access_token';
  * instead of duplicating env parsing.
  */
 export function buildAuthCookieOptions(config: ConfigService): CookieOptions {
+  // The production web app and API are deployed on different sites (Vercel and
+  // Railway). A `lax` cookie is therefore not sent on credentialed API calls,
+  // causing authenticated routes to see a missing token. Keep local development
+  // simple, while making the safe cross-site configuration the production
+  // default. Deployments can still explicitly opt into `lax` or `strict` when
+  // both applications share a site.
+  const defaultSameSite =
+    config.get<string>('NODE_ENV') === 'production' ? 'none' : 'lax';
   const sameSite = (config.get<string>('AUTH_COOKIE_SAME_SITE') ??
-    'lax') as CookieOptions['sameSite'];
+    defaultSameSite) as CookieOptions['sameSite'];
 
   const secureFlag = config.get<string>('AUTH_COOKIE_SECURE') ?? 'auto';
   const secure =
