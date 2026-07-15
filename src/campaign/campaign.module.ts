@@ -12,6 +12,12 @@ import {
 } from './campaign-unlock.service';
 import { CampaignController } from './campaign.controller';
 import { CampaignService } from './campaign.service';
+import { RefundModule } from '../refund/refund.module';
+import { CampaignFundingCloseProcessor } from './campaign-funding-close.processor';
+import {
+  CAMPAIGN_FUNDING_CLOSE_QUEUE,
+  CampaignFundingCloseService,
+} from './campaign-funding-close.service';
 
 /**
  * Owns the off-chain Campaign mirror + its on-chain deploy orchestration + the
@@ -21,9 +27,11 @@ import { CampaignService } from './campaign.service';
  */
 @Module({
   imports: [
+    RefundModule,
     BullModule.registerQueue(
       { name: CAMPAIGN_DEPLOY_QUEUE },
       { name: CAMPAIGN_UNLOCK_QUEUE },
+      { name: CAMPAIGN_FUNDING_CLOSE_QUEUE },
     ),
   ],
   controllers: [CampaignController],
@@ -33,7 +41,14 @@ import { CampaignService } from './campaign.service';
     CampaignDeployProcessor,
     CampaignUnlockService,
     CampaignUnlockProcessor,
+    CampaignFundingCloseService,
+    CampaignFundingCloseProcessor,
   ],
-  exports: [CampaignService, CampaignDeployService, CampaignUnlockService],
+  exports: [
+    CampaignService,
+    CampaignDeployService,
+    CampaignUnlockService,
+    CampaignFundingCloseService,
+  ],
 })
 export class CampaignModule {}

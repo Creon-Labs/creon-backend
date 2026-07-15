@@ -23,6 +23,9 @@ function makeDeps() {
   const prisma = {
     campaign: {
       findUnique: jest.fn(),
+      findUniqueOrThrow: jest.fn().mockResolvedValue({
+        proposal: { fundingDurationDays: 30 },
+      }),
       update: jest.fn().mockResolvedValue({}),
       findMany: jest.fn().mockResolvedValue([]),
     },
@@ -38,6 +41,8 @@ function makeDeps() {
     saltFor: jest.fn((s: string) => Buffer.from(s)),
     deployFromWasmHash: jest.fn(),
     invokeContract: jest.fn(),
+    simulateRead: jest.fn().mockResolvedValue({ u64: 2_592_000n }),
+    readU64: jest.fn((value: { u64: bigint }) => value.u64),
   };
   const config = {
     getOrThrow: (k: string) => CONFIG[k],
@@ -65,6 +70,7 @@ function makeCampaign(overrides: Record<string, unknown> = {}) {
     projectToken: { contractAddress: null, assetCode: 'WARUNGBU1234' },
     proposal: {
       businessName: 'Warung Bu Sri',
+      fundingDurationDays: 30,
       lockPeriodDays: 30,
       entrepreneur: { walletAddress: 'GBUSINESS' },
     },
@@ -141,7 +147,7 @@ describe('CampaignDeployService.drive', () => {
     });
   });
 
-  it('passes goal (stroops) and lock period (seconds) to the Campaign constructor', async () => {
+  it('passes goal, funding duration, and lock period (seconds) to the Campaign constructor', async () => {
     const { service, prisma, soroban } = makeDeps();
     prisma.campaign.findUnique.mockResolvedValue(makeCampaign());
     soroban.deployFromWasmHash

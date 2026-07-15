@@ -315,6 +315,10 @@ export class SorobanService {
   readU32(value: xdr.ScVal): number {
     return scValToNative(value) as number;
   }
+  /** Read an ScVal u64 (ledger timestamp / duration) back to bigint. */
+  readU64(value: xdr.ScVal): bigint {
+    return scValToNative(value) as bigint;
+  }
 
   // ---- read-only (simulation) helpers — used by the ownership indexer ----
 

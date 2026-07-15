@@ -27,6 +27,8 @@ function makeDeps() {
         contractAddress: CONTRACT,
         status: CampaignStatus.ACTIVE,
         deployStatus: CampaignDeployStatus.LIVE,
+        endAt: null,
+        goalAmount: new Prisma.Decimal('1000'),
       }),
       update: jest.fn().mockReturnValue('UPDATE_OP'),
     },
@@ -54,12 +56,15 @@ function makeDeps() {
     })),
     readAddress: jest.fn((v: { address: string }) => v.address),
     readI128: jest.fn((v: { i128: bigint }) => v.i128),
+    simulateRead: jest.fn().mockResolvedValue({ i128: 5_000_000_000n }),
   };
+  const fundingClose = { enqueue: jest.fn().mockResolvedValue(undefined) };
   const service = new InvestmentService(
     prisma as unknown as PrismaService,
     soroban as unknown as SorobanService,
+    fundingClose as never,
   );
-  return { service, prisma, soroban };
+  return { service, prisma, soroban, fundingClose };
 }
 
 describe('InvestmentService.prepare', () => {
@@ -131,7 +136,7 @@ describe('InvestmentService.submit', () => {
       expect.objectContaining({
         where: { id: 'camp-1' },
         data: expect.objectContaining({
-          raisedAmount: { increment: expect.anything() as unknown },
+          raisedAmount: expect.anything() as unknown,
           vault: {
             update: {
               totalDeposited: { increment: expect.anything() as unknown },

@@ -168,6 +168,9 @@ export class CampaignDeployService implements OnApplicationBootstrap {
     const lockPeriod = BigInt(
       campaign.proposal.lockPeriodDays * SECONDS_PER_DAY,
     );
+    const fundingDuration = BigInt(
+      campaign.proposal.fundingDurationDays * SECONDS_PER_DAY,
+    );
     const { contractAddress, txHash } = await this.soroban.deployFromWasmHash(
       this.campaignWasmHash,
       [
@@ -177,6 +180,7 @@ export class CampaignDeployService implements OnApplicationBootstrap {
         this.soroban.addressArg(this.usdcAddress), // usdc
         this.soroban.addressArg(campaign.proposal.entrepreneur.walletAddress), // business
         this.soroban.i128Arg(toStroops(campaign.goalAmount)), // goal
+        this.soroban.u64Arg(fundingDuration), // funding_duration
         this.soroban.u64Arg(lockPeriod), // lock_period
         this.soroban.i128VecArg(
           campaign.milestones.map((m) => toStroops(m.amount)),
@@ -216,13 +220,28 @@ export class CampaignDeployService implements OnApplicationBootstrap {
     campaignId: string,
     campaignAddress: string,
   ): Promise<void> {
+    // The contract's ledger timestamp is authoritative. The constructor fixes the
+    // deadline, so retries and host clock skew cannot change the funding window.
+    const deadline = this.soroban.readU64(
+      await this.soroban.simulateRead(campaignAddress, 'funding_deadline', []),
+    );
+    const campaign = await this.prisma.campaign.findUniqueOrThrow({
+      where: { id: campaignId },
+      select: { proposal: { select: { fundingDurationDays: true } } },
+    });
+    const endAt = new Date(Number(deadline) * 1000);
+    const startAt = new Date(
+      endAt.getTime() -
+        campaign.proposal.fundingDurationDays * SECONDS_PER_DAY * 1000,
+    );
     await this.prisma.campaign.update({
       where: { id: campaignId },
       data: {
         deployStatus: CampaignDeployStatus.LIVE,
         status: CampaignStatus.ACTIVE,
         deployError: null,
-        startAt: new Date(),
+        startAt,
+        endAt,
         vault: {
           update: {
             contractAddress: campaignAddress,
@@ -276,6 +295,7 @@ interface LoadedCampaign {
   projectToken: { contractAddress: string | null; assetCode: string };
   proposal: {
     businessName: string;
+    fundingDurationDays: number;
     lockPeriodDays: number;
     entrepreneur: { walletAddress: string };
   };

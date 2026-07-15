@@ -14,6 +14,7 @@ import {
 import { fromStroops, toStroops } from '../campaign/campaign.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { SorobanService } from '../soroban/soroban.service';
+import { CampaignFundingCloseService } from '../campaign/campaign-funding-close.service';
 import { PrepareInvestmentDto } from './dto/prepare-investment.dto';
 import { SubmitInvestmentDto } from './dto/submit-investment.dto';
 
@@ -50,6 +51,7 @@ export class InvestmentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly soroban: SorobanService,
+    private readonly fundingClose: CampaignFundingCloseService,
   ) {}
 
   /** Build an unsigned `invest()` tx (investor as source) for the wallet to sign. */
@@ -114,6 +116,16 @@ export class InvestmentService {
 
     const amount = fromStroops(amountStroops);
     try {
+      // The contract is the source of truth; events/indexing may lag this submit.
+      const onChainRaised = fromStroops(
+        this.soroban.readI128(
+          await this.soroban.simulateRead(
+            campaign.contractAddress,
+            'raised',
+            [],
+          ),
+        ),
+      );
       const [investment] = await this.prisma.$transaction([
         this.prisma.investment.create({
           data: {
@@ -130,7 +142,7 @@ export class InvestmentService {
         this.prisma.campaign.update({
           where: { id: campaignId },
           data: {
-            raisedAmount: { increment: amount },
+            raisedAmount: onChainRaised,
             vault: { update: { totalDeposited: { increment: amount } } },
           },
         }),
@@ -138,6 +150,13 @@ export class InvestmentService {
       this.logger.log(
         `Recorded investment ${investment.id} (${amount.toString()} on ${campaignId}, tx ${txHash})`,
       );
+      if (onChainRaised.greaterThanOrEqualTo(campaign.goalAmount)) {
+        await this.prisma.campaign.updateMany({
+          where: { id: campaignId, status: CampaignStatus.ACTIVE },
+          data: { status: CampaignStatus.GOAL_REACHED },
+        });
+        await this.fundingClose.enqueue(campaignId);
+      }
       return investment;
     } catch (err) {
       // Concurrent duplicate: the tx was already recorded under the unique txHash.
@@ -182,9 +201,11 @@ export class InvestmentService {
   }
 
   /** Load a campaign and assert it is open for investment (LIVE + ACTIVE). */
-  private async loadInvestable(
-    campaignId: string,
-  ): Promise<{ id: string; contractAddress: string }> {
+  private async loadInvestable(campaignId: string): Promise<{
+    id: string;
+    contractAddress: string;
+    goalAmount: Prisma.Decimal;
+  }> {
     const campaign = await this.prisma.campaign.findUnique({
       where: { id: campaignId },
       select: {
@@ -192,6 +213,8 @@ export class InvestmentService {
         contractAddress: true,
         status: true,
         deployStatus: true,
+        endAt: true,
+        goalAmount: true,
       },
     });
     if (!campaign) {
@@ -204,6 +227,14 @@ export class InvestmentService {
     ) {
       throw new ConflictException('Campaign is not open for investment');
     }
-    return { id: campaign.id, contractAddress: campaign.contractAddress };
+    if (campaign.endAt && campaign.endAt.getTime() <= Date.now()) {
+      void this.fundingClose.enqueue(campaign.id);
+      throw new ConflictException('Campaign funding deadline has passed');
+    }
+    return {
+      id: campaign.id,
+      contractAddress: campaign.contractAddress,
+      goalAmount: campaign.goalAmount,
+    };
   }
 }
