@@ -537,6 +537,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "FundingDeadline"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "86400"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "Goal"
                           }
                         ]

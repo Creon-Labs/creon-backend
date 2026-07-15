@@ -3,7 +3,7 @@
 extern crate std;
 
 use super::*;
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -12,6 +12,7 @@ use share_token::{ShareToken, ShareTokenClient};
 
 const GOAL: i128 = 1_000_000;
 const LOCK_PERIOD: u64 = 100;
+const FUNDING_DURATION: u64 = 86_400;
 
 struct F {
     e: Env,
@@ -61,6 +62,7 @@ fn setup() -> F {
             usdc_addr.clone(),
             business.clone(),
             GOAL,
+            FUNDING_DURATION,
             LOCK_PERIOD,
             Vec::from_array(&e, [600_000i128, 400_000i128]), // milestones, sum == GOAL
         ),
@@ -114,6 +116,32 @@ fn invest_non_whitelisted_reverts() {
 
     assert!(f.campaign.try_invest(&mallory, &500).is_err());
     assert_eq!(f.token.balance(&mallory), 0);
+    assert_eq!(f.campaign.raised(), 0);
+}
+
+#[test]
+fn invest_rejects_over_goal() {
+    let f = setup();
+    let alice = Address::generate(&f.e);
+    f.registry.add(&alice);
+    f.usdc_admin.mint(&alice, &(GOAL + 1));
+
+    assert!(f.campaign.try_invest(&alice, &(GOAL + 1)).is_err());
+    assert_eq!(f.campaign.raised(), 0);
+
+    f.campaign.invest(&alice, &GOAL);
+    assert_eq!(f.campaign.raised(), GOAL);
+}
+
+#[test]
+fn invest_rejects_after_funding_deadline() {
+    let f = setup();
+    let alice = Address::generate(&f.e);
+    f.registry.add(&alice);
+    f.usdc_admin.mint(&alice, &500);
+    f.e.ledger().set_timestamp(FUNDING_DURATION);
+
+    assert!(f.campaign.try_invest(&alice, &500).is_err());
     assert_eq!(f.campaign.raised(), 0);
 }
 
@@ -210,6 +238,7 @@ fn constructor_milestone_sum_mismatch_reverts() {
             usdc_addr,
             business,
             GOAL,
+            FUNDING_DURATION,
             LOCK_PERIOD,
             Vec::from_array(&e, [600_000i128, 300_000i128]),
         ),

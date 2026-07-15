@@ -59,6 +59,8 @@ pub enum CampaignError {
     RefundExists = 13,
     RefundMissing = 14,
     AlreadyRefunded = 15,
+    FundingClosed = 16,
+    GoalExceeded = 17,
 }
 
 #[contracttype]
@@ -68,6 +70,7 @@ enum DataKey {
     Usdc,
     Business,
     Goal,
+    FundingDeadline,
     LockPeriod,
     Raised,
     Released,
@@ -145,6 +148,7 @@ impl Campaign {
         usdc: Address,
         business: Address,
         goal: i128,
+        funding_duration: u64,
         lock_period: u64,
         milestone_amounts: Vec<i128>,
     ) {
@@ -166,6 +170,10 @@ impl Campaign {
         s.set(&DataKey::Usdc, &usdc);
         s.set(&DataKey::Business, &business);
         s.set(&DataKey::Goal, &goal);
+        s.set(
+            &DataKey::FundingDeadline,
+            &(e.ledger().timestamp() + funding_duration),
+        );
         s.set(&DataKey::LockPeriod, &lock_period);
         s.set(&DataKey::Raised, &0i128);
         s.set(&DataKey::Released, &0i128);
@@ -180,10 +188,19 @@ impl Campaign {
         if Self::cancelled(e) {
             panic_with_error!(e, CampaignError::CampaignCancelled);
         }
+        if e.ledger().timestamp() >= Self::funding_deadline(e) {
+            panic_with_error!(e, CampaignError::FundingClosed);
+        }
         if amount <= 0 {
             panic_with_error!(e, CampaignError::InvalidAmount);
         }
         Self::require_whitelisted(e, &investor);
+
+        // Check before pulling funds, so a direct contract invocation can never
+        // overfund even if the backend mirror is stale.
+        if Self::raised(e) + amount > Self::goal(e) {
+            panic_with_error!(e, CampaignError::GoalExceeded);
+        }
 
         let usdc = token::TokenClient::new(e, &Self::usdc(e));
         usdc.transfer(&investor, &e.current_contract_address(), &amount);
@@ -397,6 +414,9 @@ impl Campaign {
     }
     pub fn goal(e: &Env) -> i128 {
         e.storage().instance().get(&DataKey::Goal).unwrap()
+    }
+    pub fn funding_deadline(e: &Env) -> u64 {
+        e.storage().instance().get(&DataKey::FundingDeadline).unwrap()
     }
     pub fn token(e: &Env) -> Address {
         e.storage().instance().get(&DataKey::Token).unwrap()
