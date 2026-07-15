@@ -107,6 +107,7 @@ describe('CampaignService public reads', () => {
         findMany: jest.fn().mockResolvedValue([
           {
             id: 'camp-1',
+            deployStatus: CampaignDeployStatus.LIVE,
             proposal: {
               businessName: 'Warung Bu Sri',
               businessDescription: 'Warung makan keluarga',
@@ -142,6 +143,7 @@ describe('CampaignService public reads', () => {
     expect(result).toEqual([
       {
         id: 'camp-1',
+        deployStatus: CampaignDeployStatus.LIVE,
         businessName: 'Warung Bu Sri',
         businessDescription: 'Warung makan keluarga',
         media: [
@@ -157,6 +159,7 @@ describe('CampaignService public reads', () => {
     expect(prisma.campaign.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { deployStatus: CampaignDeployStatus.LIVE },
+        select: expect.objectContaining({ deployStatus: true }) as unknown,
       }) as unknown,
     );
   });
@@ -165,6 +168,7 @@ describe('CampaignService public reads', () => {
     const { service, prisma } = makeService();
     prisma.campaign.findUnique.mockResolvedValue({
       id: 'camp-1',
+      deployStatus: CampaignDeployStatus.LIVE,
       proposal: {
         businessName: 'Warung Bu Sri',
         businessDescription: 'Warung makan keluarga',
@@ -173,9 +177,14 @@ describe('CampaignService public reads', () => {
     });
     await expect(service.getPublic('camp-1')).resolves.toEqual({
       id: 'camp-1',
+      deployStatus: CampaignDeployStatus.LIVE,
       businessName: 'Warung Bu Sri',
       businessDescription: 'Warung makan keluarga',
       media: [],
+    });
+    expect(prisma.campaign.findUnique).toHaveBeenCalledWith({
+      where: { id: 'camp-1' },
+      select: expect.objectContaining({ deployStatus: true }) as unknown,
     });
   });
 

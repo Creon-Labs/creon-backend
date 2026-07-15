@@ -29,6 +29,7 @@ const PUBLIC_CAMPAIGN_SELECT = {
   goalAmount: true,
   raisedAmount: true,
   status: true,
+  deployStatus: true,
   lockEndAt: true,
   unlockStatus: true,
   unlockTxHash: true,
