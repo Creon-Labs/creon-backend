@@ -48,6 +48,7 @@ export class AdminProposalService {
         status: true,
         submittedAt: true,
         entrepreneur: { select: { walletAddress: true, email: true } },
+        campaign: { select: { id: true } },
         media: {
           select: MEDIA_SELECT,
           orderBy: { sortOrder: 'asc' as const },
@@ -56,9 +57,10 @@ export class AdminProposalService {
     });
     return Promise.all(
       rows.map(async (row) => {
-        const { media, ...rest } = row;
+        const { campaign, media, ...rest } = row;
         return {
           ...rest,
+          campaignId: campaign?.id ?? null,
           media: await mapMediaToResponse(this.storage, media),
         };
       }),

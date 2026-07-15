@@ -729,6 +729,12 @@ components:
         id:
           type: string
           format: uuid
+        campaignId:
+          type: [ string, 'null' ]
+          format: uuid
+          description: |
+            Campaign created for this proposal after approval. Present for approved
+            proposals and required when an admin cancels a live campaign.
         businessName:
           type: string
           example: Warung Kopi Nusantara

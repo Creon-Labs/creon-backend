@@ -154,6 +154,7 @@ describe('AdminProposalService.list', () => {
         status: ProposalStatus.SUBMITTED,
         submittedAt: new Date(),
         entrepreneur: { walletAddress: 'GABC', email: null },
+        campaign: { id: 'camp-1' },
         media: [
           {
             id: 'm1',
@@ -177,5 +178,13 @@ describe('AdminProposalService.list', () => {
       }),
     );
     expect(rows[0].media[0]).not.toHaveProperty('objectKey');
+    expect(rows[0]).toMatchObject({ campaignId: 'camp-1' });
+    expect(prisma.proposal.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          campaign: { select: { id: true } },
+        }),
+      }),
+    );
   });
 });
