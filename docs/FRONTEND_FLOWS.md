@@ -96,7 +96,7 @@ This process is entirely off-chain (no smart contracts involved yet). All write 
 
 | Step | Method + Path | Notes |
 |---|---|---|
-| 1 | `POST /proposals` | `{ businessName, businessDescription, category, location?, requestedAmount, lockPeriodDays, milestones }` → Returns the Proposal (`DRAFT`) with `media: []` |
+| 1 | `POST /proposals` | `{ businessName, businessDescription, category, location?, requestedAmount, fundingDurationDays, lockPeriodDays, milestones }` → Returns the Proposal (`DRAFT`) with `media: []` |
 | 2 | `PATCH /proposals/:id` | Accepts any subset of the text/milestone fields; **only allowed while in `DRAFT` state**. |
 | 3 | `POST /proposals/:id/media` | `multipart/form-data` with field(s) `images` (JPEG/PNG/WebP) and/or `documents` (PDF). Max **5 images** and **3 PDFs** per proposal, **≤5 MB** each. Optional. Returns the full Proposal with `media[]` (`url` per item). |
 | 4 | `DELETE /proposals/:id/media/:mediaId` | Remove one media item while `DRAFT`. |
@@ -106,6 +106,7 @@ This process is entirely off-chain (no smart contracts involved yet). All write 
 **Caveats:**
 - **`requestedAmount` must be a string** (e.g., `"1500.5000000"`, up to 7 decimals). Never send a standard JS `number` for financial values anywhere in this API.
 - **`lockPeriodDays` is an integer between 1–3650**. This dictates the on-chain principal-lock duration after deployment. Ensure the UI clarifies this ("Principal will be locked for X days after the Campaign goes live").
+- **`fundingDurationDays` is an integer between 1–90**. Funding starts when the contract is live; `startAt`/`endAt` on the Campaign are the canonical ledger-time window. When the target is reached it becomes `GOAL_REACHED` and no further investment is accepted. When the deadline passes below target, the campaign is cancelled and its refund is opened automatically.
 - **`milestones` is required** — an array of `{ order, title, description, amount }`. `order` must start at 1 and be contiguous integers; each `amount` is a money string; all `amount`s must sum **exactly** to `requestedAmount` (validated server-side, `400` on mismatch). These become the on-chain staged-release schedule — see Flow 8 (Milestone Submission & Voting). `PATCH /proposals/:id` can replace the whole milestone set while still `DRAFT`.
 - **Media is optional** and managed via separate multipart endpoints (not on `POST /proposals`). On admin approval, the same media rows are linked to the new Campaign (no re-upload). Use `media[].url` for thumbnails / PDF links — never expect raw storage keys.
 - **Funding statistics are read-only fields on the list and detail endpoints.** `investorCount` is the number of unique users who have made at least one `CONFIRMED` investment; it is historical and is not the current token-holder count. `raisedAmount` is a decimal string from the related Campaign. Both values are zero (`0` and `"0"`) until the Proposal has a Campaign.

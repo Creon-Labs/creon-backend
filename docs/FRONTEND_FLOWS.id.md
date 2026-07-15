@@ -96,7 +96,7 @@ Hanya berjalan *off-chain* — tidak berinteraksi dengan *contract*. Semua *rout
 
 | Langkah | Method + Path | Catatan |
 |---|---|---|
-| 1 | `POST /proposals` | `{ businessName, businessDescription, category, location?, requestedAmount, lockPeriodDays, milestones }` → kembaliannya berupa data Proposal (`DRAFT`) dengan `media: []` |
+| 1 | `POST /proposals` | `{ businessName, businessDescription, category, location?, requestedAmount, fundingDurationDays, lockPeriodDays, milestones }` → kembaliannya berupa data Proposal (`DRAFT`) dengan `media: []` |
 | 2 | `PATCH /proposals/:id` | Boleh mengirim sebagian *field* teks/milestone di atas; **hanya bisa saat status `DRAFT`** |
 | 3 | `POST /proposals/:id/media` | `multipart/form-data` dengan field `images` (JPEG/PNG/WebP) dan/atau `documents` (PDF). Maks **5 gambar** dan **3 PDF** per proposal, **≤5 MB**/file. Opsional. Mengembalikan Proposal lengkap dengan `media[]` (`url` per item). |
 | 4 | `DELETE /proposals/:id/media/:mediaId` | Hapus satu item media selama masih `DRAFT`. |
@@ -106,6 +106,7 @@ Hanya berjalan *off-chain* — tidak berinteraksi dengan *contract*. Semua *rout
 **Catatan Penting:**
 - **`requestedAmount` adalah tipe string** (contoh: `"1500.5000000"`, mendukung hingga 7 desimal) — jangan pernah mengirim tipe JS `number` untuk nominal uang di mana pun dalam API ini.
 - **`lockPeriodDays` adalah integer 1–3650** → nilai ini akan menjadi durasi *lock* modal *on-chain* setelah proses *deploy*; buat pengertiannya jelas di UI ("modal terkunci selama X hari setelah *Campaign* berjalan").
+- **`fundingDurationDays` adalah integer 1–90**. Pendanaan mulai saat contract *live*; `startAt`/`endAt` Campaign memakai waktu ledger kanonik. Target tercapai menjadi `GOAL_REACHED` dan investasi ditolak; deadline lewat di bawah target membatalkan campaign serta membuka refund otomatis.
 - **`milestones` wajib diisi** — sebuah array berisi `{ order, title, description, amount }`. `order` harus dimulai dari 1 dan berurutan (kontigu); setiap `amount` berbentuk string nominal uang; seluruh `amount` harus berjumlah **persis sama** dengan `requestedAmount` (divalidasi di sisi server, `400` jika tidak cocok). Data ini akan menjadi jadwal pencairan dana bertahap secara *on-chain* — lihat Flow 8 (Submit Milestone & Voting). `PATCH /proposals/:id` bisa mengganti seluruh set milestone selama masih berstatus `DRAFT`.
 - **Media bersifat opsional** dan dikelola lewat endpoint multipart terpisah (bukan di `POST /proposals`). Saat admin approve, media yang sama dilink ke Campaign baru (tanpa upload ulang). Gunakan `media[].url` untuk thumbnail / tautan PDF — jangan mengharapkan raw storage key.
 - **Statistik pendanaan hanya tersedia pada endpoint list dan detail.** `investorCount` adalah jumlah pengguna unik yang memiliki setidaknya satu investasi `CONFIRMED`; angka ini bersifat historis dan bukan jumlah pemegang token saat ini. `raisedAmount` adalah decimal string dari Campaign terkait. Keduanya bernilai nol (`0` dan `"0"`) sampai Proposal memiliki Campaign.
