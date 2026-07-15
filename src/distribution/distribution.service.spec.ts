@@ -214,6 +214,20 @@ describe('DistributionService.depositSubmit', () => {
   });
 });
 
+describe('DistributionService.listForCampaign', () => {
+  it('returns an empty array instead of 404 when the campaign has no distributions', async () => {
+    const { service, prisma } = makeDeps();
+    prisma.profitDistribution.findMany.mockResolvedValue([]);
+
+    await expect(service.listForCampaign('camp-1')).resolves.toEqual([]);
+    expect(prisma.profitDistribution.findMany).toHaveBeenCalledWith({
+      where: { campaignId: 'camp-1' },
+      orderBy: { onchainId: 'desc' },
+      select: expect.any(Object) as unknown,
+    });
+  });
+});
+
 describe('DistributionService.claimPrepare', () => {
   it('builds a claim() tx with the stored id/index/amount/proof', async () => {
     const { service, prisma, soroban } = makeDeps();
