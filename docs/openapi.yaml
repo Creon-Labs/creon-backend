@@ -882,6 +882,61 @@ components:
             Gallery images + optional PDF documents uploaded while DRAFT.
             On admin approval these rows are linked to the Campaign (same object keys).
 
+    ProposalWithFundingStats:
+      allOf:
+        - $ref: '#/components/schemas/Proposal'
+        - type: object
+          required:
+            - investorCount
+            - raisedAmount
+          properties:
+            investorCount:
+              type: integer
+              minimum: 0
+              description: |
+                Number of unique users with at least one CONFIRMED investment in the
+                related Campaign. This is a historical investor count, not the current
+                number of share-token holders.
+              example: 12
+            raisedAmount:
+              type: string
+              pattern: '^\d+(\.\d{1,7})?$'
+              description: |
+                Funding recorded on the related Campaign as a decimal string. Returns
+                "0" when the Proposal does not have a Campaign yet.
+              example: "7500.25"
+      examples:
+        - id: 93f51f84-2dfa-4a70-8cbc-c3b205430fac
+          businessName: Warung Kopi Nusantara
+          businessDescription: Ekspansi gerai kopi UMKM di Yogyakarta.
+          category: Kuliner
+          location: Yogyakarta
+          requestedAmount: "10000"
+          lockPeriodDays: 180
+          status: APPROVED
+          submittedAt: '2026-07-01T08:00:00Z'
+          createdAt: '2026-06-30T08:00:00Z'
+          updatedAt: '2026-07-02T08:00:00Z'
+          milestones: []
+          media: []
+          investorCount: 12
+          raisedAmount: "7500.25"
+        - id: a5b94bce-bc3b-40d1-b047-839285afff9c
+          businessName: Toko Kerajinan Lokal
+          businessDescription: Proposal pendanaan yang masih berupa draf.
+          category: Kerajinan
+          location: Bandung
+          requestedAmount: "5000"
+          lockPeriodDays: 90
+          status: DRAFT
+          submittedAt: null
+          createdAt: '2026-07-10T08:00:00Z'
+          updatedAt: '2026-07-10T08:00:00Z'
+          milestones: []
+          media: []
+          investorCount: 0
+          raisedAmount: "0"
+
     ProposalMedia:
       type: object
       description: |
@@ -2480,7 +2535,7 @@ paths:
                       data:
                         type: array
                         items:
-                          $ref: '#/components/schemas/Proposal'
+                          $ref: '#/components/schemas/ProposalWithFundingStats'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2517,7 +2572,7 @@ paths:
                   - type: object
                     properties:
                       data:
-                        $ref: '#/components/schemas/Proposal'
+                        $ref: '#/components/schemas/ProposalWithFundingStats'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

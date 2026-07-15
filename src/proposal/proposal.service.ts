@@ -7,6 +7,7 @@ import {
 import { randomUUID } from 'crypto';
 import { Prisma } from '../../generated/prisma/client';
 import {
+  InvestmentStatus,
   MilestoneStatus,
   ProposalMediaKind,
   ProposalStatus,
@@ -70,6 +71,25 @@ type ProposalWithMedia = Prisma.ProposalGetPayload<{
   select: typeof PROPOSAL_SELECT;
 }>;
 
+/** Additional funding fields returned only by the entrepreneur read endpoints. */
+const PROPOSAL_WITH_FUNDING_SELECT = {
+  ...PROPOSAL_SELECT,
+  campaign: {
+    select: {
+      raisedAmount: true,
+      investments: {
+        where: { status: InvestmentStatus.CONFIRMED },
+        distinct: ['investorId'],
+        select: { investorId: true },
+      },
+    },
+  },
+} satisfies Prisma.ProposalSelect;
+
+type ProposalWithFunding = Prisma.ProposalGetPayload<{
+  select: typeof PROPOSAL_WITH_FUNDING_SELECT;
+}>;
+
 /**
  * Entrepreneur-facing proposal lifecycle (off-chain only — no Campaign row, no
  * Soroban deploy). A proposal is created as a DRAFT, editable while DRAFT, then
@@ -115,20 +135,20 @@ export class ProposalService {
     const rows = await this.prisma.proposal.findMany({
       where: { entrepreneurId: userId },
       orderBy: { createdAt: 'desc' },
-      select: PROPOSAL_SELECT,
+      select: PROPOSAL_WITH_FUNDING_SELECT,
     });
-    return Promise.all(rows.map((r) => this.toResponse(r)));
+    return Promise.all(rows.map((r) => this.toReadResponse(r)));
   }
 
   async getMine(userId: string, id: string) {
     const proposal = await this.prisma.proposal.findFirst({
       where: { id, entrepreneurId: userId },
-      select: PROPOSAL_SELECT,
+      select: PROPOSAL_WITH_FUNDING_SELECT,
     });
     if (!proposal) {
       throw new NotFoundException('Proposal not found');
     }
-    return this.toResponse(proposal);
+    return this.toReadResponse(proposal);
   }
 
   async update(userId: string, id: string, dto: UpdateProposalDto) {
@@ -366,6 +386,16 @@ export class ProposalService {
     return {
       ...rest,
       media: await mapMediaToResponse(this.storage, media),
+    };
+  }
+
+  /** Flatten campaign funding statistics without exposing the campaign relation. */
+  private async toReadResponse(proposal: ProposalWithFunding) {
+    const { campaign, ...baseProposal } = proposal;
+    return {
+      ...(await this.toResponse(baseProposal)),
+      investorCount: campaign?.investments.length ?? 0,
+      raisedAmount: campaign?.raisedAmount.toString() ?? '0',
     };
   }
 }

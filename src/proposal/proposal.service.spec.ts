@@ -127,6 +127,8 @@ describe('ProposalService', () => {
     );
     expect(result.status).toBe('DRAFT');
     expect(result.media).toEqual([]);
+    expect(result).not.toHaveProperty('investorCount');
+    expect(result).not.toHaveProperty('raisedAmount');
   });
 
   it('rejects a zero requestedAmount on create (no write)', async () => {
@@ -194,6 +196,72 @@ describe('ProposalService', () => {
     await expect(service.getMine('u1', 'p1')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('returns zero funding statistics for a proposal without a campaign', async () => {
+    prisma.proposal.findMany.mockResolvedValue([
+      { ...emptyProposal, campaign: null },
+    ]);
+
+    const result = await service.listMine('u1');
+
+    expect(result[0]).toEqual(
+      expect.objectContaining({ investorCount: 0, raisedAmount: '0' }),
+    );
+  });
+
+  it('returns confirmed unique-investor funding statistics on list', async () => {
+    prisma.proposal.findMany.mockResolvedValue([
+      {
+        ...emptyProposal,
+        campaign: {
+          raisedAmount: { toString: () => '7500.25' },
+          investments: [{ investorId: 'u1' }, { investorId: 'u2' }],
+        },
+      },
+    ]);
+
+    const result = await service.listMine('u1');
+
+    expect(result[0]).toEqual(
+      expect.objectContaining({ investorCount: 2, raisedAmount: '7500.25' }),
+    );
+    expect(result[0]).not.toHaveProperty('campaign');
+
+    expect(prisma.proposal.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          campaign: {
+            select: expect.objectContaining({
+              investments: {
+                where: { status: 'CONFIRMED' },
+                distinct: ['investorId'],
+                select: { investorId: true },
+              },
+            }) as unknown,
+          },
+        }) as unknown,
+      }),
+    );
+  });
+
+  it('returns funding statistics on detail without exposing investor identities', async () => {
+    prisma.proposal.findFirst.mockResolvedValue({
+      ...emptyProposal,
+      campaign: {
+        raisedAmount: { toString: () => '1000' },
+        // Prisma applies distinct before these selected rows reach the mapper.
+        investments: [{ investorId: 'u1' }],
+      },
+    });
+
+    const result = await service.getMine('u1', 'p1');
+
+    expect(result).toEqual(
+      expect.objectContaining({ investorCount: 1, raisedAmount: '1000' }),
+    );
+    expect(result).not.toHaveProperty('campaign');
+    expect(JSON.stringify(result)).not.toContain('u1');
   });
 
   it('maps media objectKeys to public URLs on getMine', async () => {
